@@ -55,7 +55,9 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess, initi
                     onClose();
                 }
             } else if (view === 'reset') {
-                const { error } = await supabase.auth.resetPasswordForEmail(email);
+                const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                    redirectTo: window.location.origin,
+                });
                 if (error) throw error;
                 setMessage('Password reset email sent. Check your inbox.');
             }
