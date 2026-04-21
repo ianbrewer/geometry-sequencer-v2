@@ -1,7 +1,40 @@
 import { create } from 'zustand';
 import { supabase } from '../supabaseClient';
-import type { AppState, Project, Layer, LayerKeyframe, ProjectMetadata, Folder, ExportSettings, Keyframe } from '../types';
+import type { AppState, Project, Layer, LayerKeyframe, ProjectMetadata, Folder, ExportSettings, Keyframe, AssetFolder, Asset, AssetMimeType } from '../types';
 import { DEFAULT_ANIMATABLES } from '../constants/defaults';
+import { sanitizeSvgFile } from '../utils/sanitizeSvg';
+
+const extensionForMime = (mime: AssetMimeType): string | null => {
+    switch (mime) {
+        case 'image/svg+xml': return 'svg';
+        case 'image/png': return 'png';
+        case 'image/jpeg': return 'jpg';
+        case 'text/plain': return 'txt';
+        default: return null;
+    }
+};
+
+const guessExtensionFromName = (name: string): string | null => {
+    const idx = name.lastIndexOf('.');
+    if (idx < 0 || idx === name.length - 1) return null;
+    return name.slice(idx + 1).toLowerCase();
+};
+
+const measureRasterDimensions = (file: File): Promise<{ width: number; height: number }> => {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        };
+        img.onerror = (e) => {
+            URL.revokeObjectURL(url);
+            reject(e);
+        };
+        img.src = url;
+    });
+};
 
 export { DEFAULT_ANIMATABLES } from '../constants/defaults';
 
@@ -142,6 +175,8 @@ export const useStore = create<AppState>((set, get) => {
         project: INITIAL_PROJECT,
         savedProjects: [],
         folders: [],
+        assetFolders: [],
+        assetsByFolder: {},
         user: null,
         session: null,
         adminProfiles: [],
@@ -158,11 +193,12 @@ export const useStore = create<AppState>((set, get) => {
             // Auto-fetch projects if user is logged in
             if (session?.user) {
                 get().fetchProjects();
+                get().fetchAssetFolders();
             }
         },
         signOut: async () => {
             await supabase.auth.signOut();
-            set({ session: null, user: null, savedProjects: [], folders: [] });
+            set({ session: null, user: null, savedProjects: [], folders: [], assetFolders: [], assetsByFolder: {} });
         },
         exportSettings: { width: 1080, height: 1080, isActive: false, pixelRatio: 1 },
         currentTime: 0,
@@ -1412,6 +1448,404 @@ export const useStore = create<AppState>((set, get) => {
             } catch (e) {
                 console.error("Failed to fetch data", e);
             }
+        },
+
+        // ────────────────────────────────────────────────────────────────
+        // Asset Folder + Asset CRUD (Stage A)
+        // Tables: public.asset_folders, public.assets
+        // Bucket: v2-user-assets, path = {user_id}/{asset_id}.{ext}
+        // ────────────────────────────────────────────────────────────────
+
+        fetchAssetFolders: async () => {
+            const { user } = get();
+            if (!user) {
+                set({ assetFolders: [], assetsByFolder: {} });
+                return;
+            }
+            try {
+                const { data, error } = await supabase
+                    .from('asset_folders')
+                    .select('id, name, is_open, sort_order')
+                    .eq('user_id', user.id)
+                    .order('sort_order', { ascending: true });
+
+                // Table missing → treat as empty (should not happen once migration is live)
+                if (error && error.code !== '42P01') {
+                    console.error('Failed to fetch asset folders', error);
+                    return;
+                }
+
+                type AssetFolderRow = { id: string; name: string; is_open: boolean | null; sort_order: number | null };
+                const assetFolders: AssetFolder[] = (data || []).map((f: AssetFolderRow) => ({
+                    id: f.id,
+                    name: f.name,
+                    isOpen: f.is_open ?? false,
+                    sortOrder: f.sort_order ?? 0,
+                }));
+
+                set({ assetFolders });
+            } catch (e) {
+                console.error('Failed to fetch asset folders', e);
+            }
+        },
+
+        createAssetFolder: async (name: string) => {
+            const { user } = get();
+            if (!user) return;
+
+            const id = crypto.randomUUID();
+            const sortOrder = get().assetFolders.length;
+            const optimistic: AssetFolder = { id, name, isOpen: true, sortOrder };
+
+            set((state) => ({ assetFolders: [...state.assetFolders, optimistic] }));
+
+            try {
+                const { error } = await supabase.from('asset_folders').insert({
+                    id,
+                    user_id: user.id,
+                    name,
+                    is_open: true,
+                    sort_order: sortOrder,
+                });
+                if (error) throw error;
+                return id;
+            } catch (e) {
+                console.error('Failed to create asset folder', e);
+                set((state) => ({ assetFolders: state.assetFolders.filter((f) => f.id !== id) }));
+                return undefined;
+            }
+        },
+
+        renameAssetFolder: async (id: string, name: string) => {
+            const { user } = get();
+            if (!user) return;
+
+            const prev = get().assetFolders.find((f) => f.id === id);
+            set((state) => ({
+                assetFolders: state.assetFolders.map((f) => (f.id === id ? { ...f, name } : f)),
+            }));
+
+            try {
+                const { error } = await supabase
+                    .from('asset_folders')
+                    .update({ name })
+                    .eq('id', id)
+                    .eq('user_id', user.id);
+                if (error) throw error;
+            } catch (e) {
+                console.error('Failed to rename asset folder', e);
+                if (prev) {
+                    set((state) => ({
+                        assetFolders: state.assetFolders.map((f) => (f.id === id ? prev : f)),
+                    }));
+                }
+            }
+        },
+
+        deleteAssetFolder: async (id: string, deleteAssets?: boolean) => {
+            const { user } = get();
+            if (!user) return;
+
+            // Optimistic folder removal
+            const prevFolders = get().assetFolders;
+            const prevAssetsByFolder = get().assetsByFolder;
+            set((state) => ({
+                assetFolders: state.assetFolders.filter((f) => f.id !== id),
+            }));
+
+            try {
+                if (deleteAssets) {
+                    // Fetch asset rows so we can remove storage blobs too.
+                    const { data: assetRows } = await supabase
+                        .from('assets')
+                        .select('id, storage_path')
+                        .eq('user_id', user.id)
+                        .eq('folder_id', id);
+
+                    if (assetRows && assetRows.length > 0) {
+                        const paths = assetRows
+                            .map((r: { storage_path: string | null }) => r.storage_path)
+                            .filter((p): p is string => !!p);
+                        if (paths.length > 0) {
+                            await supabase.storage.from('v2-user-assets').remove(paths);
+                        }
+                        await supabase
+                            .from('assets')
+                            .delete()
+                            .eq('user_id', user.id)
+                            .eq('folder_id', id);
+                    }
+                }
+                // If deleteAssets is false, schema's ON DELETE SET NULL orphans asset rows.
+                const { error } = await supabase
+                    .from('asset_folders')
+                    .delete()
+                    .eq('id', id)
+                    .eq('user_id', user.id);
+                if (error) throw error;
+
+                // Clear the cached entry for this folder
+                set((state) => {
+                    const next = { ...state.assetsByFolder };
+                    delete next[id];
+                    return { assetsByFolder: next };
+                });
+            } catch (e) {
+                console.error('Failed to delete asset folder', e);
+                // Revert
+                set({ assetFolders: prevFolders, assetsByFolder: prevAssetsByFolder });
+            }
+        },
+
+        fetchAssets: async (folderId: string | null) => {
+            const { user } = get();
+            if (!user) return [];
+
+            try {
+                let query = supabase
+                    .from('assets')
+                    .select('id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified')
+                    .eq('user_id', user.id)
+                    .order('name', { ascending: true });
+
+                query = folderId === null ? query.is('folder_id', null) : query.eq('folder_id', folderId);
+
+                const { data, error } = await query;
+                if (error && error.code !== '42P01') {
+                    console.error('Failed to fetch assets', error);
+                    return [];
+                }
+
+                type AssetRow = {
+                    id: string;
+                    folder_id: string | null;
+                    name: string;
+                    mime_type: AssetMimeType;
+                    storage_path: string;
+                    size_bytes: number | null;
+                    width: number | null;
+                    height: number | null;
+                    last_modified: number | null;
+                };
+                const assets: Asset[] = (data || []).map((a: AssetRow) => ({
+                    id: a.id,
+                    folderId: a.folder_id,
+                    name: a.name,
+                    mimeType: a.mime_type,
+                    storagePath: a.storage_path,
+                    sizeBytes: a.size_bytes ?? null,
+                    width: a.width ?? null,
+                    height: a.height ?? null,
+                    lastModified: a.last_modified ?? null,
+                }));
+
+                const key = folderId ?? '';
+                set((state) => ({
+                    assetsByFolder: { ...state.assetsByFolder, [key]: assets },
+                }));
+                return assets;
+            } catch (e) {
+                console.error('Failed to fetch assets', e);
+                return [];
+            }
+        },
+
+        uploadAsset: async (folderId: string | null, file: File) => {
+            const { user } = get();
+            if (!user) return undefined;
+
+            const allowed: AssetMimeType[] = ['image/svg+xml', 'image/png', 'image/jpeg', 'text/plain'];
+            if (!allowed.includes(file.type as AssetMimeType)) {
+                console.error(`Rejected upload: ${file.type} not in allowlist`);
+                return undefined;
+            }
+
+            const MAX_SIZE = 10 * 1024 * 1024; // matches bucket cap
+            if (file.size > MAX_SIZE) {
+                console.error(`Rejected upload: ${file.name} exceeds 10MB`);
+                return undefined;
+            }
+
+            // Sanitize SVGs before upload (stored XSS vector otherwise)
+            let uploadFile: File = file;
+            if (file.type === 'image/svg+xml') {
+                try {
+                    uploadFile = await sanitizeSvgFile(file);
+                } catch (e) {
+                    console.error('SVG sanitization failed', e);
+                    return undefined;
+                }
+            }
+
+            const assetId = crypto.randomUUID();
+            const ext = extensionForMime(uploadFile.type as AssetMimeType) || guessExtensionFromName(file.name) || 'bin';
+            const storagePath = `${user.id}/${assetId}.${ext}`;
+
+            // Measure image dimensions when possible (best-effort; non-fatal)
+            let width: number | null = null;
+            let height: number | null = null;
+            if (uploadFile.type === 'image/png' || uploadFile.type === 'image/jpeg') {
+                try {
+                    const dims = await measureRasterDimensions(uploadFile);
+                    width = dims.width;
+                    height = dims.height;
+                } catch { /* ignore */ }
+            }
+
+            try {
+                const { error: uploadError } = await supabase.storage
+                    .from('v2-user-assets')
+                    .upload(storagePath, uploadFile, {
+                        contentType: uploadFile.type,
+                        upsert: false,
+                    });
+                if (uploadError) throw uploadError;
+
+                const now = Date.now();
+                const { data: row, error: rowError } = await supabase
+                    .from('assets')
+                    .insert({
+                        id: assetId,
+                        user_id: user.id,
+                        folder_id: folderId,
+                        name: file.name,
+                        mime_type: uploadFile.type,
+                        storage_path: storagePath,
+                        size_bytes: uploadFile.size,
+                        width,
+                        height,
+                        last_modified: now,
+                    })
+                    .select('id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified')
+                    .single();
+
+                if (rowError) {
+                    // DB write failed — clean up the orphan blob
+                    await supabase.storage.from('v2-user-assets').remove([storagePath]);
+                    throw rowError;
+                }
+
+                const asset: Asset = {
+                    id: row.id,
+                    folderId: row.folder_id,
+                    name: row.name,
+                    mimeType: row.mime_type,
+                    storagePath: row.storage_path,
+                    sizeBytes: row.size_bytes ?? null,
+                    width: row.width ?? null,
+                    height: row.height ?? null,
+                    lastModified: row.last_modified ?? null,
+                };
+
+                const key = folderId ?? '';
+                set((state) => ({
+                    assetsByFolder: {
+                        ...state.assetsByFolder,
+                        [key]: [...(state.assetsByFolder[key] || []), asset].sort((a, b) => a.name.localeCompare(b.name)),
+                    },
+                }));
+
+                return asset;
+            } catch (e) {
+                console.error('Failed to upload asset', e);
+                return undefined;
+            }
+        },
+
+        deleteAsset: async (id: string) => {
+            const { user } = get();
+            if (!user) return;
+
+            // Find the asset locally to know its storage path + folder for cache update
+            let found: Asset | undefined;
+            let foundKey: string | undefined;
+            for (const [key, list] of Object.entries(get().assetsByFolder)) {
+                const hit = list.find((a) => a.id === id);
+                if (hit) {
+                    found = hit;
+                    foundKey = key;
+                    break;
+                }
+            }
+
+            // Optimistic removal
+            if (foundKey !== undefined) {
+                set((state) => ({
+                    assetsByFolder: {
+                        ...state.assetsByFolder,
+                        [foundKey!]: state.assetsByFolder[foundKey!].filter((a) => a.id !== id),
+                    },
+                }));
+            }
+
+            try {
+                // Look up storage_path if we don't have it cached
+                let storagePath = found?.storagePath;
+                if (!storagePath) {
+                    const { data } = await supabase
+                        .from('assets')
+                        .select('storage_path')
+                        .eq('id', id)
+                        .eq('user_id', user.id)
+                        .maybeSingle();
+                    storagePath = data?.storage_path;
+                }
+
+                if (storagePath) {
+                    await supabase.storage.from('v2-user-assets').remove([storagePath]);
+                }
+
+                const { error } = await supabase.from('assets').delete().eq('id', id).eq('user_id', user.id);
+                if (error) throw error;
+            } catch (e) {
+                console.error('Failed to delete asset', e);
+                // Restore on failure
+                if (found && foundKey !== undefined) {
+                    set((state) => ({
+                        assetsByFolder: {
+                            ...state.assetsByFolder,
+                            [foundKey!]: [...(state.assetsByFolder[foundKey!] || []), found!].sort((a, b) => a.name.localeCompare(b.name)),
+                        },
+                    }));
+                }
+            }
+        },
+
+        signedUrlForAsset: async (id: string) => {
+            const { user } = get();
+            if (!user) return null;
+
+            // Find storage_path locally if cached; otherwise round-trip to DB
+            let storagePath: string | undefined;
+            for (const list of Object.values(get().assetsByFolder)) {
+                const hit = list.find((a) => a.id === id);
+                if (hit) {
+                    storagePath = hit.storagePath;
+                    break;
+                }
+            }
+
+            if (!storagePath) {
+                const { data } = await supabase
+                    .from('assets')
+                    .select('storage_path')
+                    .eq('id', id)
+                    .eq('user_id', user.id)
+                    .maybeSingle();
+                storagePath = data?.storage_path;
+            }
+
+            if (!storagePath) return null;
+
+            const { data, error } = await supabase.storage
+                .from('v2-user-assets')
+                .createSignedUrl(storagePath, 60 * 60); // 1 hour
+
+            if (error) {
+                console.error('Failed to sign url', error);
+                return null;
+            }
+            return data?.signedUrl ?? null;
         },
 
         setGlobalLineColor: (color) => set((state) => ({

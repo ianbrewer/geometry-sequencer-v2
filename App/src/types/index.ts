@@ -22,6 +22,27 @@ export interface Folder {
     isOpen: boolean; // For UI state
 }
 
+export type AssetMimeType = 'image/svg+xml' | 'image/png' | 'image/jpeg' | 'text/plain';
+
+export interface AssetFolder {
+    id: string;
+    name: string;
+    isOpen: boolean;
+    sortOrder: number;
+}
+
+export interface Asset {
+    id: string;
+    folderId: string | null;
+    name: string; // original filename
+    mimeType: AssetMimeType;
+    storagePath: string; // `{user_id}/{asset_id}.{ext}` in v2-user-assets
+    sizeBytes: number | null;
+    width: number | null;
+    height: number | null;
+    lastModified: number | null;
+}
+
 export interface Profile {
     id: string;
     email: string;
@@ -258,10 +279,22 @@ export interface AppState {
     project: Project;
     savedProjects: ProjectMetadata[];
     folders: Folder[];
+    assetFolders: AssetFolder[];
+    assetsByFolder: Record<string, Asset[]>; // keyed by assetFolder.id ('' for unfiled)
     user: User | null;
     session: Session | null;
     setUser: (session: Session | null) => void;
     signOut: () => Promise<void>;
+
+    // Asset Actions (Stage A)
+    fetchAssetFolders: () => Promise<void>;
+    createAssetFolder: (name: string) => Promise<string | undefined>;
+    renameAssetFolder: (id: string, name: string) => Promise<void>;
+    deleteAssetFolder: (id: string, deleteAssets?: boolean) => Promise<void>;
+    fetchAssets: (folderId: string | null) => Promise<Asset[]>;
+    uploadAsset: (folderId: string | null, file: File) => Promise<Asset | undefined>;
+    deleteAsset: (id: string) => Promise<void>;
+    signedUrlForAsset: (id: string) => Promise<string | null>;
 
     // Folder Actions
     createFolder: (name: string) => Promise<string | undefined>;
