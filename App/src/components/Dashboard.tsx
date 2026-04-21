@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore';
 import { formatDistanceToNow } from 'date-fns';
 import GeometryCanvas from './GeometryCanvas';
 import ExportModal from './ExportModal';
+import AssetLibrary from './AssetLibrary';
 import {
     DndContext,
     closestCenter,
@@ -353,6 +354,7 @@ const Dashboard: React.FC = () => {
     const [showExportModal, setShowExportModal] = useState(false);
     const [newlyCreatedFolderId, setNewlyCreatedFolderId] = useState<string | null>(null);
     const [folderToDelete, setFolderToDelete] = useState<{ id: string, name: string, projectCount: number } | null>(null);
+    const [sidebarTab, setSidebarTab] = useState<'projects' | 'assets'>('projects');
     const canvasWrapperRef = React.useRef<HTMLDivElement>(null);
     const sidebarScrollRef = React.useRef<HTMLDivElement>(null);
 
@@ -521,6 +523,30 @@ const Dashboard: React.FC = () => {
                             </div>
                         </header>
 
+                        {/* Tab switcher */}
+                        <div className="flex gap-1 mb-4 p-1 bg-[#252525] rounded">
+                            <button
+                                onClick={() => setSidebarTab('projects')}
+                                className={`flex-1 py-1.5 rounded text-[10px] font-bold uppercase tracking-widest transition-colors ${sidebarTab === 'projects'
+                                    ? 'bg-[#1a1a1a] text-[#D4AF37]'
+                                    : 'text-white/50 hover:text-white/80'
+                                    }`}
+                            >
+                                Projects
+                            </button>
+                            <button
+                                onClick={() => setSidebarTab('assets')}
+                                className={`flex-1 py-1.5 rounded text-[10px] font-bold uppercase tracking-widest transition-colors ${sidebarTab === 'assets'
+                                    ? 'bg-[#1a1a1a] text-[#D4AF37]'
+                                    : 'text-white/50 hover:text-white/80'
+                                    }`}
+                            >
+                                Assets
+                            </button>
+                        </div>
+
+                        {sidebarTab === 'projects' && (
+                        <>
                         <div className="flex gap-2 mb-4">
                             <button onClick={createNewProject} className="flex-1 bg-[#D4AF37] hover:bg-[#F5E091] text-black font-bold py-2 rounded flex items-center justify-center gap-2 text-xs">
                                 <Plus size={14} /> New Project
@@ -556,8 +582,11 @@ const Dashboard: React.FC = () => {
                             />
                             <FolderIcon className="absolute left-3 top-2.5 text-white/20" size={14} />
                         </div>
+                        </>
+                        )}
                     </div>
 
+                    {sidebarTab === 'projects' ? (
                     <div className="flex-1 overflow-y-auto p-4" ref={sidebarScrollRef}>
                         {isSearching ? (
                             // Flat List
@@ -606,6 +635,11 @@ const Dashboard: React.FC = () => {
                         )}
                         <div className="h-20"></div> {/* Spacer */}
                     </div>
+                    ) : (
+                        <div className="flex-1 overflow-y-auto py-4 flex flex-col">
+                            <AssetLibrary />
+                        </div>
+                    )}
                 </div>
 
                 {/* PREVIEW AREA */}
