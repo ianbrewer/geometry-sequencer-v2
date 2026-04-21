@@ -79,7 +79,16 @@ const App: React.FC = () => {
 
   // Wire AssetCache providers (renderer consults the store via these indirections).
   React.useEffect(() => {
-    assetCache.setUrlProvider((id) => useStore.getState().signedUrlForAsset(id));
+    assetCache.setUrlProvider(async (id) => {
+      const url = await useStore.getState().signedUrlForAsset(id);
+      if (!url) return null;
+      let mimeType = 'application/octet-stream';
+      for (const list of Object.values(useStore.getState().assetsByFolder)) {
+        const hit = list.find(a => a.id === id);
+        if (hit) { mimeType = hit.mimeType; break; }
+      }
+      return { url, mimeType };
+    });
     assetCache.setFolderAssetsProvider((folderId) => {
       const key = folderId ?? '';
       return (useStore.getState().assetsByFolder[key] || []).map(a => ({ id: a.id, mimeType: a.mimeType }));

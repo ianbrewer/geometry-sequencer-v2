@@ -1,8 +1,15 @@
 import { Assets, Texture } from 'pixi.js';
 
-type UrlProvider = (assetId: string) => Promise<string | null>;
+type LoadInfo = { url: string; mimeType: string };
+type UrlProvider = (assetId: string) => Promise<LoadInfo | null>;
 export type AssetEntry = { id: string; mimeType: string };
 type FolderAssetsProvider = (folderId: string | null) => AssetEntry[];
+
+// Rasterization factor for SVGs. Pixi v8 otherwise rasterizes SVGs at their
+// natural (viewBox) size, which pixelates badly when the sprite is scaled up
+// for a large layer. 8x covers diameters up to ~960px on 120px viewBoxes
+// without a meaningful memory hit.
+const SVG_RASTER_RESOLUTION = 8;
 
 class AssetCacheImpl {
     private textures = new Map<string, Texture>();
@@ -37,9 +44,11 @@ class AssetCacheImpl {
     private async load(assetId: string): Promise<Texture | null> {
         if (!this.urlProvider) return null;
         try {
-            const url = await this.urlProvider(assetId);
-            if (!url) return null;
-            const tex = await Assets.load<Texture>(url);
+            const info = await this.urlProvider(assetId);
+            if (!info) return null;
+            const tex = info.mimeType === 'image/svg+xml'
+                ? await Assets.load<Texture>({ src: info.url, data: { resolution: SVG_RASTER_RESOLUTION } })
+                : await Assets.load<Texture>(info.url);
             this.textures.set(assetId, tex);
             return tex;
         } catch (e) {
