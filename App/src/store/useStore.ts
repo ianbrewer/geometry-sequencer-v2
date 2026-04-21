@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import type { AppState, Project, Layer, LayerKeyframe, ProjectMetadata, Folder, ExportSettings, Keyframe, AssetFolder, Asset, AssetMimeType } from '../types';
 import { DEFAULT_ANIMATABLES } from '../constants/defaults';
 import { sanitizeSvgFile } from '../utils/sanitizeSvg';
+import { optimizeAsset } from '../utils/assetOptimizer';
 import {
     SEED_FOLDER_NAMES,
     LEGACY_TYPE_TO_SEED_FOLDER,
@@ -1727,6 +1728,10 @@ export const useStore = create<AppState>((set, get) => {
                     return undefined;
                 }
             }
+
+            // Compress before upload — SVGO for SVG, canvas re-encode for raster.
+            // Target ~200KB steady-state; 10MB bucket cap is the ceiling, not a goal.
+            uploadFile = await optimizeAsset(uploadFile);
 
             const assetId = crypto.randomUUID();
             const ext = extensionForMime(uploadFile.type as AssetMimeType) || guessExtensionFromName(file.name) || 'bin';
