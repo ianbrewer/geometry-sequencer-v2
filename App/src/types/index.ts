@@ -301,6 +301,7 @@ export interface AppState {
     uploadAsset: (folderId: string | null, file: File) => Promise<Asset | undefined>;
     deleteAsset: (id: string) => Promise<void>;
     signedUrlForAsset: (id: string) => Promise<string | null>;
+    seedDefaultAssetFolders: () => Promise<void>;
 
     // Folder Actions
     createFolder: (name: string) => Promise<string | undefined>;

@@ -3,6 +3,15 @@ import { supabase } from '../supabaseClient';
 import type { AppState, Project, Layer, LayerKeyframe, ProjectMetadata, Folder, ExportSettings, Keyframe, AssetFolder, Asset, AssetMimeType } from '../types';
 import { DEFAULT_ANIMATABLES } from '../constants/defaults';
 import { sanitizeSvgFile } from '../utils/sanitizeSvg';
+import {
+    SEED_FOLDER_NAMES,
+    LEGACY_TYPE_TO_SEED_FOLDER,
+    generateAstrologySvgs,
+    generateAminoSvgs,
+    generateIChingStrokeSvgs,
+} from '../data/seedAssets';
+
+const seededFlagKey = (userId: string) => `v2-seeded-asset-folders:${userId}`;
 
 const extensionForMime = (mime: AssetMimeType): string | null => {
     switch (mime) {
@@ -1111,6 +1120,27 @@ export const useStore = create<AppState>((set, get) => {
                         });
                     }
 
+                    // Legacy-type migration (Stage F): rewrite astrology / amino /
+                    // iching_lines layers into asset_set pointing at the matching seed
+                    // folder. The rewrite is in-memory here; the next save persists it.
+                    // Layers whose seed folder isn't available yet keep their legacy
+                    // type — the renderer's legacy branches still handle them.
+                    const foldersByName = new Map(get().assetFolders.map(f => [f.name, f.id]));
+                    projectData.layers = projectData.layers.map((layer: any) => {
+                        const seedName = LEGACY_TYPE_TO_SEED_FOLDER[layer.type];
+                        if (!seedName) return layer;
+                        const folderId = foldersByName.get(seedName);
+                        if (!folderId) return layer;
+                        return {
+                            ...layer,
+                            type: 'asset_set',
+                            config: {
+                                ...layer.config,
+                                assetFolderId: folderId,
+                            },
+                        };
+                    });
+
                     set({
                         project: projectData,
                         currentView: view,
@@ -1495,6 +1525,16 @@ export const useStore = create<AppState>((set, get) => {
                 }));
 
                 set({ assetFolders });
+
+                // First-login seeding: if the user has no folders yet and we haven't
+                // attempted to seed before, drop in the three legacy icon sets as real
+                // asset folders. The localStorage flag prevents us from re-seeding if
+                // the user intentionally deleted everything later.
+                const flagKey = seededFlagKey(user.id);
+                if (assetFolders.length === 0 && !localStorage.getItem(flagKey)) {
+                    await get().seedDefaultAssetFolders();
+                    localStorage.setItem(flagKey, String(Date.now()));
+                }
             } catch (e) {
                 console.error('Failed to fetch asset folders', e);
             }
@@ -1818,6 +1858,39 @@ export const useStore = create<AppState>((set, get) => {
                             [foundKey!]: [...(state.assetsByFolder[foundKey!] || []), found!].sort((a, b) => a.name.localeCompare(b.name)),
                         },
                     }));
+                }
+            }
+        },
+
+        // Seeds the three legacy icon sets (Astrology / Amino Acids / I-Ching
+        // Strokes) as real asset folders for a brand-new user. Safe to call
+        // repeatedly: skips any seed folder that already exists by name.
+        seedDefaultAssetFolders: async () => {
+            const { user } = get();
+            if (!user) return;
+
+            type SeedBatch = { folder: string; assets: { name: string; svg: string }[] };
+            const batches: SeedBatch[] = [
+                { folder: SEED_FOLDER_NAMES.astrology, assets: generateAstrologySvgs() },
+                { folder: SEED_FOLDER_NAMES.amino, assets: generateAminoSvgs() },
+                { folder: SEED_FOLDER_NAMES.ichingLines, assets: generateIChingStrokeSvgs() },
+            ];
+
+            for (const { folder: folderName, assets } of batches) {
+                // Skip if this seed folder already exists (idempotency).
+                const existing = get().assetFolders.find((f) => f.name === folderName);
+                if (existing) continue;
+
+                const folderId = await get().createAssetFolder(folderName);
+                if (!folderId) {
+                    console.warn(`Seed: failed to create folder "${folderName}"`);
+                    continue;
+                }
+
+                for (const asset of assets) {
+                    const blob = new Blob([asset.svg], { type: 'image/svg+xml' });
+                    const file = new File([blob], asset.name, { type: 'image/svg+xml' });
+                    await get().uploadAsset(folderId, file);
                 }
             }
         },
