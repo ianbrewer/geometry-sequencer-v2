@@ -1120,6 +1120,17 @@ export const useStore = create<AppState>((set, get) => {
                         isPlaying: view === 'player',
                         isLooping: view === 'dashboard' ? true : get().isLooping
                     });
+
+                    // Preload asset folders referenced by asset_set layers so the renderer
+                    // can see their asset lists (asset_single uses the DB fallback in
+                    // signedUrlForAsset, so no preload needed).
+                    const folderIds = new Set<string>();
+                    for (const layer of projectData.layers) {
+                        if (layer.type === 'asset_set' && layer.config?.assetFolderId) {
+                            folderIds.add(layer.config.assetFolderId);
+                        }
+                    }
+                    folderIds.forEach((fid) => { get().fetchAssets(fid); });
                 }
             } catch (e) {
                 console.error('Failed to load project', e);
