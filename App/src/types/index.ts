@@ -1,6 +1,6 @@
 import type { User, Session } from '@supabase/supabase-js';
 
-export type ShapeType = 'polygon' | 'star' | 'circle' | 'diamond' | 'vesica' | 'line' | 'custom' | 'molecule' | 'iching' | 'iching_lines' | 'polyhedron' | 'group' | 'astrology' | 'amino';
+export type ShapeType = 'polygon' | 'star' | 'circle' | 'diamond' | 'vesica' | 'line' | 'custom' | 'molecule' | 'iching' | 'iching_lines' | 'polyhedron' | 'group' | 'astrology' | 'amino' | 'asset_set' | 'asset_single';
 // export type KeyState = 'start' | 'middle' | 'end'; // Removed
 export type InternalLinesType = 'none' | 'center' | 'all';
 export type GridLayoutType = 'radial' | 'hexagonal' | 'linear' | '';
@@ -207,6 +207,12 @@ export interface LayerConfig {
     // I-Ching Specific
     ichingInputId?: number; // 1-64
     ichingHighlightIndex?: number; // 1-6 (0 for none)
+
+    // Asset Specific (Stage C)
+    // For 'asset_set': folder whose assets form the instance series (count = folder size).
+    // For 'asset_single': one asset used as the inner shape across instances.
+    assetFolderId?: string | null;
+    assetId?: string | null;
 
     // Group 2 Radial Specific
     radialArc2?: number; // 0-360
