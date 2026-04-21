@@ -1,0 +1,4 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+    <path d="M48.5 93 V24 M48.5 24 C48.5 21 50 17.5 52 15 C54.5 12.5 58 11 61 11 C64.5 11 68 12.5 70 15 C73 17.5 74 21 74 24 V83 C74 86 75 88.5 77 90 C79 92 81.5 93 84 93 H110 M48.5 24 C48.5 21 47 17.5 45 15 C42 12.5 39 11 35.5 11 C32 11 29 12.5 26.5 15 C24 17.5 23 21 23 24 M110 93 L94.5 78 M110 93 L94.5 109 M23 93 V24 M23 24 C23 21 21.5 17.5 19 15 C16.5 12.5 13.5 11 10 11" fill="none" stroke="#8667A5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

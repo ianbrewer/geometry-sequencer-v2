@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hole Test No Pixi External</title>
+    <style>body,html{margin:0;overflow:hidden;background:#000;width:400px;height:400px;}#c{width:100%;height:100%;}</style>
+</head>
+<body>
+    <div id="c"></div>
+    <script src="./player.js"></script>
+    <script>
+        const pd = "M200,200 m-100,0 a100,100 0 1,0 200,0 a100,100 0 1,0 -200,0 M200,200 m-50,0 a50,50 0 1,1 100,0 a50,50 0 1,1 -100,0";
+        const projectData = {
+            id: "hole_test_bundled", name: "Holes", duration: 10, layers: [
+                {
+                    id: "L1", type: "custom", visible: true,
+                    timeline: { start: 0, end: 10 },
+                    config: {
+                        customPath: pd, customPaths: [pd],
+                        sides: 3, instances: 1, fillEnabled: true, strokeEnabled: false, fillColor: "#ffffff", alignToPath: true
+                    },
+                    keyframes: [
+                        { id: "k1", time: 0, easing: "linear", value: {
+                            radiusX: 100, radiusY: 100, posX: 0, posY: 0, opacity: 255
+                        }}
+                    ], symmetry: {enabled: false}
+                }
+            ]
+        };
+        window.onload = () => { if(window.GeometryApp) window.GeometryApp.init('c', projectData); };
+    </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "geometry-sequencer-main",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "abs-svg-path": "^0.1.1",
+    "glob": "^13.0.6",
+    "parse-svg-path": "^0.1.2",
+    "svg-path-bbox": "^2.1.0"
+  }
+}
