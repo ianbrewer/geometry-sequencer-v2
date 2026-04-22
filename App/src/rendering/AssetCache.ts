@@ -6,10 +6,10 @@ export type AssetEntry = { id: string; mimeType: string };
 type FolderAssetsProvider = (folderId: string | null) => AssetEntry[];
 
 // Rasterization factor for SVGs. Pixi v8 otherwise rasterizes SVGs at their
-// natural (viewBox) size, which pixelates badly when the sprite is scaled up
-// for a large layer. 8x covers diameters up to ~960px on 120px viewBoxes
-// without a meaningful memory hit.
-const SVG_RASTER_RESOLUTION = 8;
+// natural (viewBox) size, which pixelates when the sprite is scaled up.
+// 4x yields ~480px textures for our 120px seed viewBoxes — crisp at typical
+// on-screen sizes and light enough to batch smoothly across many instances.
+const SVG_RASTER_RESOLUTION = 4;
 
 class AssetCacheImpl {
     private textures = new Map<string, Texture>();
