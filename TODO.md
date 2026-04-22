@@ -14,6 +14,14 @@ See [plan-asset-based-shapes.md](./plan-asset-based-shapes.md) and [docs/project
 - [ ] **Stage D — Inspector asset picker (+ Stage E auto-layout)** — `feat/asset-inspector-stage-d`. Replace the astrology/amino/iching pulldown options with asset picker; apply radial-vs-linear defaults based on folder size.
 - [ ] **Stage F — Seed folders + project migration** — `feat/asset-seed-migration-stage-f`. Seed Astrology / Amino Acids / I-Ching Strokes folders on first login; rewrite legacy layer types to `asset_set` on project load.
 - [ ] **Stage G — Cleanup: retire legacy types + `custom`** — `feat/asset-cleanup-stage-g`. After Supabase audit confirms no legacy rows, delete astrology/amino/iching_lines branches and `custom` type; auto-convert remaining `custom` layers to `asset_single`.
+- [ ] **Stage H — Optional vector rendering for SVG assets** — `feat/asset-vector-mode-stage-h`. Per-layer opt-in to true vector rendering for close-up/hero layers where the 4× raster starts to soften.
+    - **Config:** add `vectorAsset?: boolean` to `LayerConfig` (default false). Applies only when the layer's resolved asset is `image/svg+xml`; PNG/JPEG ignore the flag.
+    - **AssetCache:** split the cache into two maps keyed on `(assetId, mode)` where `mode ∈ {'texture', 'vector'}`. Add `getGraphicsContextSync(assetId): GraphicsContext | null` that loads via `Assets.load({ src, data: { parseAsGraphicsContext: true } })`. `invalidate(assetId)` clears both modes. Keep `getTextureSync` unchanged so the default fast path is untouched.
+    - **Renderer:** in the `asset_set` / `asset_single` branch, if `effectiveConfig.vectorAsset && folderAssetEntry.mimeType === 'image/svg+xml'`, request the GraphicsContext and build `new Graphics(ctx)` instead of `new Sprite(texture)`. Size via `graphics.getLocalBounds()` to compute the same `targetMax / maxBound` scale we currently apply to sprites. If the ctx is still loading or unavailable, fall back silently to the sprite path.
+    - **Inspector:** toggle next to the asset picker (Stage D UI). Only render the toggle when the current asset's mime is `image/svg+xml`. Label something like "Crisp at any scale (vector)". Inline helper text: "Slower with many instances."
+    - **Perf guardrail:** soft-warn (small text under the toggle) when `instances * symmetryMultiplier > 24`. No hard block — user decision.
+    - **Migration:** none needed. New optional field, defaults false, no existing rows affected.
+    - **Out of scope:** per-instance mode switching, or auto-promoting to vector at high zoom. Keep the flag static per layer.
 
 ### Cross-cutting
 
