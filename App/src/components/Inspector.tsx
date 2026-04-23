@@ -6,6 +6,7 @@ import { MOLECULES } from '../data/molecules';
 import type { ShapeType, AnimatableProperties, AssetFolder, Asset } from '../types';
 import BezierEditor from './BezierEditor';
 import { ModernToggle } from './ModernToggle';
+import { useInspectorTooltip } from './InspectorTooltip';
 import { CustomColorPicker } from './CustomColorPicker';
 
 const ScrubbableInput: React.FC<{
@@ -247,23 +248,30 @@ const AssetPicker: React.FC<AssetPickerProps> = ({
 // -------------------------------------------------------------------------
 
 // Helper for labels
-const ControlSlider: React.FC<any> = ({ label, value, onChange, min, max, step, icon, defaultValue, disabled }) => (
-    <div className={`flex items-center justify-between mb-1 ${disabled ? 'opacity-50' : ''}`}>
-        <label className="text-[9px] uppercase font-bold text-white/40 flex items-center gap-1.5 min-w-[60px]">
-            {label}
-        </label>
-        <ScrubbableInput
-            value={value}
-            onChange={onChange}
-            min={min}
-            max={max}
-            step={step || 1}
-            icon={icon}
-            onIconDoubleClick={defaultValue !== undefined ? () => onChange(defaultValue) : undefined}
-            disabled={disabled}
-        />
-    </div>
-);
+const ControlSlider: React.FC<any> = ({ label, value, onChange, min, max, step, icon, defaultValue, disabled, tooltip }) => {
+    const { setTooltip } = useInspectorTooltip();
+    return (
+        <div
+            className={`flex items-center justify-between mb-1 ${disabled ? 'opacity-50' : ''}`}
+            onMouseEnter={() => { if (tooltip) setTooltip(tooltip); }}
+            onMouseLeave={() => { if (tooltip) setTooltip(null); }}
+        >
+            <label className="text-[9px] uppercase font-bold text-white/40 flex items-center gap-1.5 min-w-[60px]">
+                {label}
+            </label>
+            <ScrubbableInput
+                value={value}
+                onChange={onChange}
+                min={min}
+                max={max}
+                step={step || 1}
+                icon={icon}
+                onIconDoubleClick={defaultValue !== undefined ? () => onChange(defaultValue) : undefined}
+                disabled={disabled}
+            />
+        </div>
+    );
+};
 
 const Inspector: React.FC = () => {
     const {
@@ -1228,6 +1236,7 @@ const Inspector: React.FC = () => {
                                 {/* COUNT */}
                                 <ControlSlider
                                     label="Count"
+                                    tooltip="Number of instances"
                                     value={
                                         activeLayer?.type === 'astrology' ? 12
                                             : activeLayer?.type === 'amino' ? 20
@@ -1242,39 +1251,43 @@ const Inspector: React.FC = () => {
                                     disabled={activeLayer?.type === 'astrology' || activeLayer?.type === 'amino' || activeLayer?.type === 'iching_lines' || activeLayer?.type === 'asset_set'}
                                 />
 
-                                {/* SPAN & ALIGN */}
-                                <div className="flex justify-between items-center px-1 mt-2 mb-1 border-t border-white/5 pt-2">
-                                    <ModernToggle
-                                        checked={activeLayer?.config?.alignToPath}
-                                        onChange={(val, skip?: boolean) => setConfigValue('alignToPath', val, skip)}
-                                        label="ALIGN"
-                                    />
-                                    <ControlSlider label="Span" value={activeLayer.config.radialArc ?? 360} min={-360} max={360} onChange={(v: number, skip?: boolean) => setConfigValue('radialArc', v, skip)} isFixed className="w-32 mb-0 px-0" />
+                                {/* RADIAL LAYOUT */}
+                                <div className="mt-3 pt-2 border-t border-white/5">
+                                    <div className="text-[9px] uppercase font-bold text-white/30 tracking-wider mb-1.5">Radial Layout</div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <ControlSlider label="Radius" tooltip="Distance of each instance from the layer's center" value={getAnimValue('orbitRadius')} icon={<Timer size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('orbitRadius', v, skip)} disabled={!activeKeyframe} />
+                                        <ControlSlider label="Arc" tooltip="Total angle swept across all instances (degrees; negative reverses direction)" value={activeLayer.config.radialArc ?? 360} min={-360} max={360} onChange={(v: number, skip?: boolean) => setConfigValue('radialArc', v, skip)} isFixed />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 mt-1 items-center">
+                                        <ControlSlider label="Start" tooltip="Starting angle of the first instance (degrees)" value={getAnimValue('rotateOrbit')} icon={<Shuffle size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('rotateOrbit', v, skip)} disabled={!activeKeyframe} />
+                                        <ModernToggle
+                                            checked={activeLayer?.config?.alignToPath}
+                                            onChange={(val, skip?: boolean) => setConfigValue('alignToPath', val, skip)}
+                                            label="ALIGN PATH"
+                                            tooltip="Rotate each instance to face along the orbit ring"
+                                        />
+                                    </div>
                                 </div>
 
-                                <div className="space-y-1 mt-1">
-                                    {/* Spacing X/Y (Linear) */}
-                                    <div className="grid grid-cols-2 gap-2 mt-2">
-                                        <ControlSlider label="Spacing X" value={getAnimValue('spacingX')} icon={<Move size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('spacingX', v, skip)} disabled={!activeKeyframe} />
-                                        <ControlSlider label="Spacing Y" value={getAnimValue('spacingY')} icon={<Move size={12} className="rotate-90" />} onChange={(v: number, skip?: boolean) => setAnimValue('spacingY', v, skip)} disabled={!activeKeyframe} />
+                                {/* LINEAR OFFSET */}
+                                <div className="mt-3 pt-2 border-t border-white/5">
+                                    <div className="text-[9px] uppercase font-bold text-white/30 tracking-wider mb-1.5">Linear Offset</div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <ControlSlider label="Spacing X" tooltip="Adds N pixels in X per instance (accumulates)" value={getAnimValue('spacingX')} icon={<Move size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('spacingX', v, skip)} disabled={!activeKeyframe} />
+                                        <ControlSlider label="Spacing Y" tooltip="Adds N pixels in Y per instance (accumulates)" value={getAnimValue('spacingY')} icon={<Move size={12} className="rotate-90" />} onChange={(v: number, skip?: boolean) => setAnimValue('spacingY', v, skip)} disabled={!activeKeyframe} />
                                     </div>
+                                </div>
 
-                                    {/* Spread/Rotate (Radial) */}
+                                {/* PER-INSTANCE */}
+                                <div className="mt-3 pt-2 border-t border-white/5">
+                                    <div className="text-[9px] uppercase font-bold text-white/30 tracking-wider mb-1.5">Per-Instance</div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <ControlSlider label="Rotation" tooltip="Rotate each instance N° more than the last" value={getAnimValue('instanceRotation')} icon={<RotateCw size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('instanceRotation', v, skip)} disabled={!activeKeyframe} />
+                                        <ControlSlider label="Rot Grow" tooltip="Compounds Rotation across instances (0 = linear, >0 accelerates)" value={getAnimValue('instanceRotationMult')} step={0.01} icon={<TrendingUp size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('instanceRotationMult', v, skip)} disabled={!activeKeyframe} />
+                                    </div>
                                     <div className="grid grid-cols-2 gap-2 mt-1">
-                                        <ControlSlider label="Spread" value={getAnimValue('orbitRadius')} icon={<Timer size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('orbitRadius', v, skip)} disabled={!activeKeyframe} />
-                                        <ControlSlider label="Orbit Rot" value={getAnimValue('rotateOrbit')} icon={<Shuffle size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('rotateOrbit', v, skip)} disabled={!activeKeyframe} />
-                                    </div>
-
-                                    {/* Instance Rotation */}
-                                    <div className="grid grid-cols-2 gap-2 mt-1">
-                                        <ControlSlider label="Inst Rot" value={getAnimValue('instanceRotation')} icon={<RotateCw size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('instanceRotation', v, skip)} disabled={!activeKeyframe} />
-                                        <ControlSlider label="Rot Mult" value={getAnimValue('instanceRotationMult')} step={0.01} icon={<TrendingUp size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('instanceRotationMult', v, skip)} disabled={!activeKeyframe} />
-                                    </div>
-
-                                    {/* Prog/Offset */}
-                                    <div className="grid grid-cols-2 gap-2 gap-y-2 mt-1">
-                                        <ControlSlider label="Prog" value={getAnimValue('offsetMult')} step={0.01} icon={<TrendingUp size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('offsetMult', v, skip)} disabled={!activeKeyframe} />
-                                        <ControlSlider label="Offset" value={getAnimValue('radiusOffset')} icon={<Move size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('radiusOffset', v, skip)} disabled={!activeKeyframe} />
+                                        <ControlSlider label="Size Step" tooltip="Each instance's shape is N pixels larger than the last" value={getAnimValue('radiusOffset')} icon={<Move size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('radiusOffset', v, skip)} disabled={!activeKeyframe} />
+                                        <ControlSlider label="Size Grow" tooltip="Compounds Size Step across instances (0 = linear, >0 accelerates)" value={getAnimValue('offsetMult')} step={0.01} icon={<TrendingUp size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('offsetMult', v, skip)} disabled={!activeKeyframe} />
                                     </div>
                                 </div>
 
@@ -1301,43 +1314,46 @@ const Inspector: React.FC = () => {
                                                 </button>
                                             </div>
 
-                                            {/* DUPLICATE CONTROLS MAPPED TO *2 */}
                                             {/* Count 2 */}
-                                            <ControlSlider label="Count" value={activeLayer?.config?.instances2 || 1} min={1} max={100} step={1} icon={<Hash size={12} />} onChange={(v: number, skip?: boolean) => setConfigValue('instances2', v, skip)} isFixed />
+                                            <ControlSlider label="Count" tooltip="Number of recursive instances" value={activeLayer?.config?.instances2 || 1} min={1} max={100} step={1} icon={<Hash size={12} />} onChange={(v: number, skip?: boolean) => setConfigValue('instances2', v, skip)} isFixed />
 
-                                            {/* Span & Align 2 */}
-                                            <div className="flex justify-between items-center px-1 mt-2 mb-1 border-t border-white/5 pt-2">
-                                                <ModernToggle
-                                                    checked={activeLayer?.config?.alignToPath2 ?? false}
-                                                    onChange={(val, skip?: boolean) => setConfigValue('alignToPath2', val, skip)}
-                                                    label="ALIGN"
-                                                />
-                                                <ControlSlider label="Span" value={activeLayer.config.radialArc2 ?? 360} min={-360} max={360} onChange={(v: number, skip?: boolean) => setConfigValue('radialArc2', v, skip)} isFixed className="w-32 mb-0 px-0" />
+                                            {/* RADIAL LAYOUT 2 */}
+                                            <div className="mt-3 pt-2 border-t border-white/5">
+                                                <div className="text-[9px] uppercase font-bold text-white/30 tracking-wider mb-1.5">Radial Layout</div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <ControlSlider label="Radius" tooltip="Distance of each instance from the layer's center" value={getAnimValue('orbitRadius2')} icon={<Timer size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('orbitRadius2', v, skip)} disabled={!activeKeyframe} />
+                                                    <ControlSlider label="Arc" tooltip="Total angle swept across all instances (degrees; negative reverses direction)" value={activeLayer.config.radialArc2 ?? 360} min={-360} max={360} onChange={(v: number, skip?: boolean) => setConfigValue('radialArc2', v, skip)} isFixed />
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2 mt-1 items-center">
+                                                    <ControlSlider label="Start" tooltip="Starting angle of the first instance (degrees)" value={getAnimValue('rotateOrbit2')} icon={<Shuffle size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('rotateOrbit2', v, skip)} disabled={!activeKeyframe} />
+                                                    <ModernToggle
+                                                        checked={activeLayer?.config?.alignToPath2 ?? false}
+                                                        onChange={(val, skip?: boolean) => setConfigValue('alignToPath2', val, skip)}
+                                                        label="ALIGN PATH"
+                                                        tooltip="Rotate each instance to face along the orbit ring"
+                                                    />
+                                                </div>
                                             </div>
 
-                                            <div className="space-y-1 mt-1">
-                                                {/* Spacing X/Y 2 */}
-                                                <div className="grid grid-cols-2 gap-2 mt-2">
-                                                    <ControlSlider label="Spacing X" value={getAnimValue('spacingX2')} icon={<Move size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('spacingX2', v, skip)} disabled={!activeKeyframe} />
-                                                    <ControlSlider label="Spacing Y" value={getAnimValue('spacingY2')} icon={<Move size={12} className="rotate-90" />} onChange={(v: number, skip?: boolean) => setAnimValue('spacingY2', v, skip)} disabled={!activeKeyframe} />
+                                            {/* LINEAR OFFSET 2 */}
+                                            <div className="mt-3 pt-2 border-t border-white/5">
+                                                <div className="text-[9px] uppercase font-bold text-white/30 tracking-wider mb-1.5">Linear Offset</div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <ControlSlider label="Spacing X" tooltip="Adds N pixels in X per instance (accumulates)" value={getAnimValue('spacingX2')} icon={<Move size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('spacingX2', v, skip)} disabled={!activeKeyframe} />
+                                                    <ControlSlider label="Spacing Y" tooltip="Adds N pixels in Y per instance (accumulates)" value={getAnimValue('spacingY2')} icon={<Move size={12} className="rotate-90" />} onChange={(v: number, skip?: boolean) => setAnimValue('spacingY2', v, skip)} disabled={!activeKeyframe} />
                                                 </div>
+                                            </div>
 
-                                                {/* Spread/Rotate 2 */}
+                                            {/* PER-INSTANCE 2 */}
+                                            <div className="mt-3 pt-2 border-t border-white/5">
+                                                <div className="text-[9px] uppercase font-bold text-white/30 tracking-wider mb-1.5">Per-Instance</div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <ControlSlider label="Rotation" tooltip="Rotate each instance N° more than the last" value={getAnimValue('instanceRotation2')} icon={<RotateCw size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('instanceRotation2', v, skip)} disabled={!activeKeyframe} />
+                                                    <ControlSlider label="Rot Grow" tooltip="Compounds Rotation across instances (0 = linear, >0 accelerates)" value={getAnimValue('instanceRotationMult2')} step={0.01} icon={<TrendingUp size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('instanceRotationMult2', v, skip)} disabled={!activeKeyframe} />
+                                                </div>
                                                 <div className="grid grid-cols-2 gap-2 mt-1">
-                                                    <ControlSlider label="Spread" value={getAnimValue('orbitRadius2')} icon={<Timer size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('orbitRadius2', v, skip)} disabled={!activeKeyframe} />
-                                                    <ControlSlider label="Orbit Rot" value={getAnimValue('rotateOrbit2')} icon={<Shuffle size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('rotateOrbit2', v, skip)} disabled={!activeKeyframe} />
-                                                </div>
-
-                                                {/* Instance Rotation 2 */}
-                                                <div className="grid grid-cols-2 gap-2 mt-1">
-                                                    <ControlSlider label="Inst Rot" value={getAnimValue('instanceRotation2')} icon={<RotateCw size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('instanceRotation2', v, skip)} disabled={!activeKeyframe} />
-                                                    <ControlSlider label="Rot Mult" value={getAnimValue('instanceRotationMult2')} step={0.01} icon={<TrendingUp size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('instanceRotationMult2', v, skip)} disabled={!activeKeyframe} />
-                                                </div>
-
-                                                {/* Prog/Offset 2 */}
-                                                <div className="grid grid-cols-2 gap-2 gap-y-2 mt-1">
-                                                    <ControlSlider label="Prog" value={getAnimValue('offsetMult2')} step={0.01} icon={<TrendingUp size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('offsetMult2', v, skip)} disabled={!activeKeyframe} />
-                                                    <ControlSlider label="Offset" value={getAnimValue('radiusOffset2')} icon={<Move size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('radiusOffset2', v, skip)} disabled={!activeKeyframe} />
+                                                    <ControlSlider label="Size Step" tooltip="Each instance's shape is N pixels larger than the last" value={getAnimValue('radiusOffset2')} icon={<Move size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('radiusOffset2', v, skip)} disabled={!activeKeyframe} />
+                                                    <ControlSlider label="Size Grow" tooltip="Compounds Size Step across instances (0 = linear, >0 accelerates)" value={getAnimValue('offsetMult2')} step={0.01} icon={<TrendingUp size={12} />} onChange={(v: number, skip?: boolean) => setAnimValue('offsetMult2', v, skip)} disabled={!activeKeyframe} />
                                                 </div>
                                             </div>
                                         </div>
