@@ -1,10 +1,13 @@
 import { Application, Container, Graphics, BlurFilter, Color, Sprite, NoiseFilter, DisplacementFilter, Texture } from 'pixi.js';
+import { assetCache, type AssetEntry } from './AssetCache';
+import { buildColorKey, type SvgRecolorOptions } from '../utils/svgRecolor';
 import { GlowFilter } from 'pixi-filters/glow';
 import { ShockwaveFilter } from 'pixi-filters/shockwave';
 import { TwistFilter } from 'pixi-filters/twist';
 import { BulgePinchFilter } from 'pixi-filters/bulge-pinch';
 import { MotionBlurFilter } from 'pixi-filters/motion-blur';
 import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
+import { ColorOverlayFilter } from 'pixi-filters/color-overlay';
 import { interpolateGeneric } from '../utils/interpolation';
 import { updatePrimitive } from '../rendering/PrimitiveRenderer';
 import { createGradientTexture } from '../utils/gradients';
@@ -430,10 +433,76 @@ export class GeometryRenderer {
                     rootWrapper.rotation = rotationDeg * (Math.PI / 180);
                 }
 
+                // Asset-folder contents (empty for non-asset layers).
+                const assetFolderAssets: AssetEntry[] =
+                    layer.type === 'asset_set' && effectiveConfig.assetFolderId
+                        ? assetCache.getAssetsInFolder(effectiveConfig.assetFolderId)
+                        : [];
+
+                // Resolve the asset id for this layer at instance index `i` (asset_set cycles
+                // through the folder; asset_single always returns the same id).
+                const resolveAssetId = (i: number): string | null => {
+                    if (layer.type === 'asset_set') {
+                        if (!assetFolderAssets.length) return null;
+                        const entry = assetFolderAssets[i % assetFolderAssets.length];
+                        return entry ? entry.id : null;
+                    }
+                    if (layer.type === 'asset_single') {
+                        return effectiveConfig.assetId ?? null;
+                    }
+                    return null;
+                };
+
                 // Inner Shape Factory
-                const createInnerShape = (i: number, level1Progressive: number) => {
+                const createInnerShape = (i: number, level1Progressive: number): Container | Graphics => {
                     const rx = currentRadiusX + i * currentRadiusOffset * level1Progressive;
                     const ry = currentRadiusY + i * currentRadiusOffset * level1Progressive;
+
+                    // Asset-based shapes: render as a Pixi Sprite using the cached Texture.
+                    // Returns an empty Container placeholder while the texture loads (it
+                    // will appear on a subsequent frame — the renderer runs every tick).
+                    if (layer.type === 'asset_set' || layer.type === 'asset_single') {
+                        const wrapper = this.getContainer();
+                        const id = resolveAssetId(i);
+                        if (!id) return wrapper;
+                        const recolorOpts: SvgRecolorOptions = {
+                            fillEnabled: effectiveConfig.fillEnabled,
+                            fillColor: effectiveConfig.fillColor,
+                            strokeEnabled: effectiveConfig.strokeEnabled,
+                            strokeColor: effectiveConfig.strokeColor,
+                            gradientEnabled: effectiveConfig.gradientEnabled,
+                            gradientStops: effectiveConfig.gradientStops,
+                        };
+                        const colorKey = buildColorKey(recolorOpts);
+                        // For SVGs, the recolored variant is rasterized from rewritten source.
+                        // For rasters, ColorOverlayFilter replaces RGB with fillColor while
+                        // preserving the source alpha — gives a true silhouette recolor
+                        // regardless of the PNG's original color (tint would only multiply).
+                        const useVariant = colorKey && assetCache.isSvg(id);
+                        const texture = useVariant
+                            ? assetCache.getTextureSync(id, colorKey, recolorOpts)
+                            : assetCache.getTextureSync(id);
+                        if (!texture) return wrapper; // loading; retry next frame
+                        const sprite = new Sprite(texture);
+                        sprite.anchor.set(0.5);
+                        if (!useVariant && effectiveConfig.fillEnabled && effectiveConfig.fillColor) {
+                            const colorNum = new Color(effectiveConfig.fillColor).toNumber();
+                            sprite.filters = [new ColorOverlayFilter({ color: colorNum, alpha: 1 })];
+                        }
+                        // Respect original aspect ratio — fit the sprite's bounding box inside
+                        // the layer's radius while preserving the texture's width:height ratio.
+                        const texW = texture.width || 1;
+                        const texH = texture.height || 1;
+                        const targetMax = Math.max(Math.abs(rx), Math.abs(ry)) * 2; // full extent = diameter
+                        if (targetMax > 0) {
+                            const scale = targetMax / Math.max(texW, texH);
+                            sprite.scale.set(scale);
+                        }
+                        sprite.rotation = currentRotateShape * (Math.PI / 180);
+                        wrapper.addChild(sprite);
+                        return wrapper;
+                    }
+
                     const g = this.getGraphics();
 
                     let progress = 0;
@@ -506,7 +575,11 @@ export class GeometryRenderer {
                     return container;
                 };
 
-                const count1 = layer.type === 'astrology' ? 12 : layer.type === 'amino' ? 20 : layer.type === 'iching_lines' ? 64 : Math.max(1, layer.config.instances);
+                const count1 = layer.type === 'astrology' ? 12
+                    : layer.type === 'amino' ? 20
+                    : layer.type === 'iching_lines' ? 64
+                    : layer.type === 'asset_set' ? Math.max(1, assetFolderAssets.length)
+                    : Math.max(1, layer.config.instances);
                 const params1 = {
                     spacingX: currentSpacingX,
                     spacingY: currentSpacingY,

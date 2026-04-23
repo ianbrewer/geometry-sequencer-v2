@@ -27,6 +27,7 @@ import { TwistFilter } from 'pixi-filters/twist';
 import { BulgePinchFilter } from 'pixi-filters/bulge-pinch';
 import { MotionBlurFilter } from 'pixi-filters/motion-blur';
 import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
+import { ColorOverlayFilter } from 'pixi-filters/color-overlay';
 
 // ── Expose as Globals ───────────────────────────────────────
 // The player bundle accesses these via window.PIXI / window.PIXI_FILTERS
@@ -38,4 +39,5 @@ import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
     BulgePinchFilter,
     MotionBlurFilter,
     AdvancedBloomFilter,
+    ColorOverlayFilter,
 };

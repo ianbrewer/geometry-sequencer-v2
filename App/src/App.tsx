@@ -10,6 +10,7 @@ import AdminDashboard from './components/AdminDashboard';
 import Player from './components/Player';
 import LandingPage from './components/LandingPage';
 import { supabase } from './supabaseClient';
+import { assetCache } from './rendering/AssetCache';
 
 const App: React.FC = () => {
   // useAnimation(); // Moved to GeometryCanvas internally
@@ -75,6 +76,28 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [undo, redo]);
+
+  // Wire AssetCache providers (renderer consults the store via these indirections).
+  React.useEffect(() => {
+    assetCache.setUrlProvider(async (id) => {
+      const url = await useStore.getState().signedUrlForAsset(id);
+      if (!url) return null;
+      let mimeType = 'application/octet-stream';
+      for (const list of Object.values(useStore.getState().assetsByFolder)) {
+        const hit = list.find(a => a.id === id);
+        if (hit) { mimeType = hit.mimeType; break; }
+      }
+      return { url, mimeType };
+    });
+    assetCache.setFolderAssetsProvider((folderId) => {
+      const key = folderId ?? '';
+      return (useStore.getState().assetsByFolder[key] || []).map(a => ({ id: a.id, mimeType: a.mimeType }));
+    });
+    return () => {
+      assetCache.setUrlProvider(null);
+      assetCache.setFolderAssetsProvider(null);
+    };
+  }, []);
 
   // Auth Listener
   React.useEffect(() => {

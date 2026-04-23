@@ -1,7 +1,50 @@
 import { create } from 'zustand';
 import { supabase } from '../supabaseClient';
-import type { AppState, Project, Layer, LayerKeyframe, ProjectMetadata, Folder, ExportSettings, Keyframe } from '../types';
+import type { AppState, Project, Layer, LayerKeyframe, ProjectMetadata, Folder, ExportSettings, Keyframe, AssetFolder, Asset, AssetMimeType } from '../types';
 import { DEFAULT_ANIMATABLES } from '../constants/defaults';
+import { sanitizeSvgFile } from '../utils/sanitizeSvg';
+import { optimizeAsset } from '../utils/assetOptimizer';
+import {
+    SEED_FOLDER_NAMES,
+    LEGACY_TYPE_TO_SEED_FOLDER,
+    generateAstrologySvgs,
+    generateAminoSvgs,
+    generateIChingStrokeSvgs,
+} from '../data/seedAssets';
+
+const seededFlagKey = (userId: string) => `v2-seeded-asset-folders:${userId}`;
+
+const extensionForMime = (mime: AssetMimeType): string | null => {
+    switch (mime) {
+        case 'image/svg+xml': return 'svg';
+        case 'image/png': return 'png';
+        case 'image/jpeg': return 'jpg';
+        case 'text/plain': return 'txt';
+        default: return null;
+    }
+};
+
+const guessExtensionFromName = (name: string): string | null => {
+    const idx = name.lastIndexOf('.');
+    if (idx < 0 || idx === name.length - 1) return null;
+    return name.slice(idx + 1).toLowerCase();
+};
+
+const measureRasterDimensions = (file: File): Promise<{ width: number; height: number }> => {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        };
+        img.onerror = (e) => {
+            URL.revokeObjectURL(url);
+            reject(e);
+        };
+        img.src = url;
+    });
+};
 
 export { DEFAULT_ANIMATABLES } from '../constants/defaults';
 
@@ -142,6 +185,8 @@ export const useStore = create<AppState>((set, get) => {
         project: INITIAL_PROJECT,
         savedProjects: [],
         folders: [],
+        assetFolders: [],
+        assetsByFolder: {},
         user: null,
         session: null,
         adminProfiles: [],
@@ -158,11 +203,12 @@ export const useStore = create<AppState>((set, get) => {
             // Auto-fetch projects if user is logged in
             if (session?.user) {
                 get().fetchProjects();
+                get().fetchAssetFolders();
             }
         },
         signOut: async () => {
             await supabase.auth.signOut();
-            set({ session: null, user: null, savedProjects: [], folders: [] });
+            set({ session: null, user: null, savedProjects: [], folders: [], assetFolders: [], assetsByFolder: {} });
         },
         exportSettings: { width: 1080, height: 1080, isActive: false, pixelRatio: 1 },
         currentTime: 0,
@@ -1075,6 +1121,27 @@ export const useStore = create<AppState>((set, get) => {
                         });
                     }
 
+                    // Legacy-type migration (Stage F): rewrite astrology / amino /
+                    // iching_lines layers into asset_set pointing at the matching seed
+                    // folder. The rewrite is in-memory here; the next save persists it.
+                    // Layers whose seed folder isn't available yet keep their legacy
+                    // type — the renderer's legacy branches still handle them.
+                    const foldersByName = new Map(get().assetFolders.map(f => [f.name, f.id]));
+                    projectData.layers = projectData.layers.map((layer: any) => {
+                        const seedName = LEGACY_TYPE_TO_SEED_FOLDER[layer.type];
+                        if (!seedName) return layer;
+                        const folderId = foldersByName.get(seedName);
+                        if (!folderId) return layer;
+                        return {
+                            ...layer,
+                            type: 'asset_set',
+                            config: {
+                                ...layer.config,
+                                assetFolderId: folderId,
+                            },
+                        };
+                    });
+
                     set({
                         project: projectData,
                         currentView: view,
@@ -1084,6 +1151,17 @@ export const useStore = create<AppState>((set, get) => {
                         isPlaying: view === 'player',
                         isLooping: view === 'dashboard' ? true : get().isLooping
                     });
+
+                    // Preload asset folders referenced by asset_set layers so the renderer
+                    // can see their asset lists (asset_single uses the DB fallback in
+                    // signedUrlForAsset, so no preload needed).
+                    const folderIds = new Set<string>();
+                    for (const layer of projectData.layers) {
+                        if (layer.type === 'asset_set' && layer.config?.assetFolderId) {
+                            folderIds.add(layer.config.assetFolderId);
+                        }
+                    }
+                    folderIds.forEach((fid) => { get().fetchAssets(fid); });
                 }
             } catch (e) {
                 console.error('Failed to load project', e);
@@ -1412,6 +1490,512 @@ export const useStore = create<AppState>((set, get) => {
             } catch (e) {
                 console.error("Failed to fetch data", e);
             }
+        },
+
+        // ────────────────────────────────────────────────────────────────
+        // Asset Folder + Asset CRUD (Stage A)
+        // Tables: public.asset_folders, public.assets
+        // Bucket: v2-user-assets, path = {user_id}/{asset_id}.{ext}
+        // ────────────────────────────────────────────────────────────────
+
+        fetchAssetFolders: async () => {
+            const { user } = get();
+            if (!user) {
+                set({ assetFolders: [], assetsByFolder: {} });
+                return;
+            }
+            try {
+                const { data, error } = await supabase
+                    .from('asset_folders')
+                    .select('id, name, is_open, sort_order')
+                    .eq('user_id', user.id)
+                    .order('sort_order', { ascending: true });
+
+                // Table missing → treat as empty (should not happen once migration is live)
+                if (error && error.code !== '42P01') {
+                    console.error('Failed to fetch asset folders', error);
+                    return;
+                }
+
+                type AssetFolderRow = { id: string; name: string; is_open: boolean | null; sort_order: number | null };
+                const assetFolders: AssetFolder[] = (data || []).map((f: AssetFolderRow) => ({
+                    id: f.id,
+                    name: f.name,
+                    isOpen: f.is_open ?? false,
+                    sortOrder: f.sort_order ?? 0,
+                }));
+
+                set({ assetFolders });
+
+                // First-login seeding: if the user has no folders yet and we haven't
+                // attempted to seed before, drop in the three legacy icon sets as real
+                // asset folders. The localStorage flag prevents us from re-seeding if
+                // the user intentionally deleted everything later.
+                const flagKey = seededFlagKey(user.id);
+                if (assetFolders.length === 0 && !localStorage.getItem(flagKey)) {
+                    await get().seedDefaultAssetFolders();
+                    localStorage.setItem(flagKey, String(Date.now()));
+                }
+            } catch (e) {
+                console.error('Failed to fetch asset folders', e);
+            }
+        },
+
+        createAssetFolder: async (name: string) => {
+            const { user } = get();
+            if (!user) return;
+
+            const id = crypto.randomUUID();
+            const sortOrder = get().assetFolders.length;
+            const optimistic: AssetFolder = { id, name, isOpen: true, sortOrder };
+
+            set((state) => ({ assetFolders: [...state.assetFolders, optimistic] }));
+
+            try {
+                const { error } = await supabase.from('asset_folders').insert({
+                    id,
+                    user_id: user.id,
+                    name,
+                    is_open: true,
+                    sort_order: sortOrder,
+                });
+                if (error) throw error;
+                return id;
+            } catch (e) {
+                console.error('Failed to create asset folder', e);
+                set((state) => ({ assetFolders: state.assetFolders.filter((f) => f.id !== id) }));
+                return undefined;
+            }
+        },
+
+        renameAssetFolder: async (id: string, name: string) => {
+            const { user } = get();
+            if (!user) return;
+
+            const prev = get().assetFolders.find((f) => f.id === id);
+            set((state) => ({
+                assetFolders: state.assetFolders.map((f) => (f.id === id ? { ...f, name } : f)),
+            }));
+
+            try {
+                const { error } = await supabase
+                    .from('asset_folders')
+                    .update({ name })
+                    .eq('id', id)
+                    .eq('user_id', user.id);
+                if (error) throw error;
+            } catch (e) {
+                console.error('Failed to rename asset folder', e);
+                if (prev) {
+                    set((state) => ({
+                        assetFolders: state.assetFolders.map((f) => (f.id === id ? prev : f)),
+                    }));
+                }
+            }
+        },
+
+        deleteAssetFolder: async (id: string, deleteAssets?: boolean) => {
+            const { user } = get();
+            if (!user) return;
+
+            // Optimistic folder removal
+            const prevFolders = get().assetFolders;
+            const prevAssetsByFolder = get().assetsByFolder;
+            set((state) => ({
+                assetFolders: state.assetFolders.filter((f) => f.id !== id),
+            }));
+
+            try {
+                if (deleteAssets) {
+                    // Fetch asset rows so we can remove storage blobs too.
+                    const { data: assetRows } = await supabase
+                        .from('assets')
+                        .select('id, storage_path')
+                        .eq('user_id', user.id)
+                        .eq('folder_id', id);
+
+                    if (assetRows && assetRows.length > 0) {
+                        const paths = assetRows
+                            .map((r: { storage_path: string | null }) => r.storage_path)
+                            .filter((p): p is string => !!p);
+                        if (paths.length > 0) {
+                            await supabase.storage.from('v2-user-assets').remove(paths);
+                        }
+                        await supabase
+                            .from('assets')
+                            .delete()
+                            .eq('user_id', user.id)
+                            .eq('folder_id', id);
+                    }
+                }
+                // If deleteAssets is false, schema's ON DELETE SET NULL orphans asset rows.
+                const { error } = await supabase
+                    .from('asset_folders')
+                    .delete()
+                    .eq('id', id)
+                    .eq('user_id', user.id);
+                if (error) throw error;
+
+                // Clear the cached entry for this folder
+                set((state) => {
+                    const next = { ...state.assetsByFolder };
+                    delete next[id];
+                    return { assetsByFolder: next };
+                });
+            } catch (e) {
+                console.error('Failed to delete asset folder', e);
+                // Revert
+                set({ assetFolders: prevFolders, assetsByFolder: prevAssetsByFolder });
+            }
+        },
+
+        fetchAssets: async (folderId: string | null) => {
+            const { user } = get();
+            if (!user) return [];
+
+            type AssetRow = {
+                id: string;
+                folder_id: string | null;
+                name: string;
+                mime_type: AssetMimeType;
+                storage_path: string;
+                size_bytes: number | null;
+                width: number | null;
+                height: number | null;
+                last_modified: number | null;
+                sort_order?: number | null;
+            };
+
+            const runQuery = async (withSortOrder: boolean) => {
+                const cols = withSortOrder
+                    ? 'id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified, sort_order'
+                    : 'id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified';
+                let q = supabase.from('assets').select(cols).eq('user_id', user.id);
+                q = withSortOrder ? q.order('sort_order', { ascending: true, nullsFirst: false }) : q;
+                q = q.order('name', { ascending: true });
+                q = folderId === null ? q.is('folder_id', null) : q.eq('folder_id', folderId);
+                return q;
+            };
+
+            try {
+                let { data, error } = await runQuery(true);
+                // Fallback when the migration hasn't been applied yet: retry without sort_order.
+                if (error && error.code === '42703') {
+                    ({ data, error } = await runQuery(false));
+                }
+                if (error && error.code !== '42P01') {
+                    console.error('Failed to fetch assets', error);
+                    return [];
+                }
+
+                const assets: Asset[] = ((data as AssetRow[] | null) || []).map((a) => ({
+                    id: a.id,
+                    folderId: a.folder_id,
+                    name: a.name,
+                    mimeType: a.mime_type,
+                    storagePath: a.storage_path,
+                    sizeBytes: a.size_bytes ?? null,
+                    width: a.width ?? null,
+                    height: a.height ?? null,
+                    lastModified: a.last_modified ?? null,
+                    sortOrder: a.sort_order ?? null,
+                }));
+
+                const key = folderId ?? '';
+                set((state) => ({
+                    assetsByFolder: { ...state.assetsByFolder, [key]: assets },
+                }));
+                return assets;
+            } catch (e) {
+                console.error('Failed to fetch assets', e);
+                return [];
+            }
+        },
+
+        uploadAsset: async (folderId: string | null, file: File) => {
+            const { user } = get();
+            if (!user) return undefined;
+
+            const allowed: AssetMimeType[] = ['image/svg+xml', 'image/png', 'image/jpeg', 'text/plain'];
+            if (!allowed.includes(file.type as AssetMimeType)) {
+                console.error(`Rejected upload: ${file.type} not in allowlist`);
+                return undefined;
+            }
+
+            const MAX_SIZE = 10 * 1024 * 1024; // matches bucket cap
+            if (file.size > MAX_SIZE) {
+                console.error(`Rejected upload: ${file.name} exceeds 10MB`);
+                return undefined;
+            }
+
+            // Sanitize SVGs before upload (stored XSS vector otherwise)
+            let uploadFile: File = file;
+            if (file.type === 'image/svg+xml') {
+                try {
+                    uploadFile = await sanitizeSvgFile(file);
+                } catch (e) {
+                    console.error('SVG sanitization failed', e);
+                    return undefined;
+                }
+            }
+
+            // Compress before upload — SVGO for SVG, canvas re-encode for raster.
+            // Target ~200KB steady-state; 10MB bucket cap is the ceiling, not a goal.
+            uploadFile = await optimizeAsset(uploadFile);
+
+            const assetId = crypto.randomUUID();
+            const ext = extensionForMime(uploadFile.type as AssetMimeType) || guessExtensionFromName(file.name) || 'bin';
+            const storagePath = `${user.id}/${assetId}.${ext}`;
+
+            // Measure image dimensions when possible (best-effort; non-fatal)
+            let width: number | null = null;
+            let height: number | null = null;
+            if (uploadFile.type === 'image/png' || uploadFile.type === 'image/jpeg') {
+                try {
+                    const dims = await measureRasterDimensions(uploadFile);
+                    width = dims.width;
+                    height = dims.height;
+                } catch { /* ignore */ }
+            }
+
+            try {
+                const { error: uploadError } = await supabase.storage
+                    .from('v2-user-assets')
+                    .upload(storagePath, uploadFile, {
+                        contentType: uploadFile.type,
+                        upsert: false,
+                    });
+                if (uploadError) throw uploadError;
+
+                // Land new uploads at the end of the folder. Base on the current cache (which
+                // already reflects any uploads still in flight from the same batch).
+                const cacheKey = folderId ?? '';
+                const existing = get().assetsByFolder[cacheKey] || [];
+                const nextSortOrder = existing.reduce(
+                    (max, a) => (a.sortOrder != null && a.sortOrder > max ? a.sortOrder : max),
+                    -1,
+                ) + 1;
+
+                const now = Date.now();
+                const { data: row, error: rowError } = await supabase
+                    .from('assets')
+                    .insert({
+                        id: assetId,
+                        user_id: user.id,
+                        folder_id: folderId,
+                        name: file.name,
+                        mime_type: uploadFile.type,
+                        storage_path: storagePath,
+                        size_bytes: uploadFile.size,
+                        width,
+                        height,
+                        last_modified: now,
+                        sort_order: nextSortOrder,
+                    })
+                    .select('id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified, sort_order')
+                    .single();
+
+                if (rowError) {
+                    // DB write failed — clean up the orphan blob
+                    await supabase.storage.from('v2-user-assets').remove([storagePath]);
+                    throw rowError;
+                }
+
+                const asset: Asset = {
+                    id: row.id,
+                    folderId: row.folder_id,
+                    name: row.name,
+                    mimeType: row.mime_type,
+                    storagePath: row.storage_path,
+                    sizeBytes: row.size_bytes ?? null,
+                    width: row.width ?? null,
+                    height: row.height ?? null,
+                    lastModified: row.last_modified ?? null,
+                    sortOrder: row.sort_order ?? null,
+                };
+
+                set((state) => ({
+                    assetsByFolder: {
+                        ...state.assetsByFolder,
+                        [cacheKey]: [...(state.assetsByFolder[cacheKey] || []), asset],
+                    },
+                }));
+
+                return asset;
+            } catch (e) {
+                console.error('Failed to upload asset', e);
+                return undefined;
+            }
+        },
+
+        deleteAsset: async (id: string) => {
+            const { user } = get();
+            if (!user) return;
+
+            // Find the asset locally to know its storage path + folder for cache update
+            let found: Asset | undefined;
+            let foundKey: string | undefined;
+            for (const [key, list] of Object.entries(get().assetsByFolder)) {
+                const hit = list.find((a) => a.id === id);
+                if (hit) {
+                    found = hit;
+                    foundKey = key;
+                    break;
+                }
+            }
+
+            // Optimistic removal
+            if (foundKey !== undefined) {
+                set((state) => ({
+                    assetsByFolder: {
+                        ...state.assetsByFolder,
+                        [foundKey!]: state.assetsByFolder[foundKey!].filter((a) => a.id !== id),
+                    },
+                }));
+            }
+
+            try {
+                // Look up storage_path if we don't have it cached
+                let storagePath = found?.storagePath;
+                if (!storagePath) {
+                    const { data } = await supabase
+                        .from('assets')
+                        .select('storage_path')
+                        .eq('id', id)
+                        .eq('user_id', user.id)
+                        .maybeSingle();
+                    storagePath = data?.storage_path;
+                }
+
+                if (storagePath) {
+                    await supabase.storage.from('v2-user-assets').remove([storagePath]);
+                }
+
+                const { error } = await supabase.from('assets').delete().eq('id', id).eq('user_id', user.id);
+                if (error) throw error;
+            } catch (e) {
+                console.error('Failed to delete asset', e);
+                // Restore on failure, preserving manual sort order.
+                if (found && foundKey !== undefined) {
+                    set((state) => ({
+                        assetsByFolder: {
+                            ...state.assetsByFolder,
+                            [foundKey!]: [...(state.assetsByFolder[foundKey!] || []), found!].sort((a, b) => {
+                                const ao = a.sortOrder;
+                                const bo = b.sortOrder;
+                                if (ao == null && bo == null) return a.name.localeCompare(b.name);
+                                if (ao == null) return 1;
+                                if (bo == null) return -1;
+                                return ao - bo;
+                            }),
+                        },
+                    }));
+                }
+            }
+        },
+
+        reorderAssets: async (folderId: string | null, startIndex: number, endIndex: number) => {
+            const { user } = get();
+            if (!user) return;
+            if (startIndex === endIndex) return;
+
+            const key = folderId ?? '';
+            const prev = get().assetsByFolder[key] || [];
+            if (startIndex < 0 || startIndex >= prev.length || endIndex < 0 || endIndex >= prev.length) return;
+
+            const reordered = [...prev];
+            const [moved] = reordered.splice(startIndex, 1);
+            reordered.splice(endIndex, 0, moved);
+
+            // Optimistic: reassign sort_order to the full list sequentially so
+            // every row has a stable index (no NULL gaps left behind).
+            const withOrder: Asset[] = reordered.map((a, i) => ({ ...a, sortOrder: i }));
+
+            set((state) => ({
+                assetsByFolder: { ...state.assetsByFolder, [key]: withOrder },
+            }));
+
+            try {
+                await Promise.all(withOrder.map((a, i) =>
+                    supabase.from('assets').update({ sort_order: i }).eq('id', a.id).eq('user_id', user.id)
+                ));
+            } catch (e) {
+                console.error('Failed to reorder assets', e);
+                // Rollback to previous order
+                set((state) => ({
+                    assetsByFolder: { ...state.assetsByFolder, [key]: prev },
+                }));
+            }
+        },
+
+        // Seeds the three legacy icon sets (Astrology / Amino Acids / I-Ching
+        // Strokes) as real asset folders for a brand-new user. Safe to call
+        // repeatedly: skips any seed folder that already exists by name.
+        seedDefaultAssetFolders: async () => {
+            const { user } = get();
+            if (!user) return;
+
+            type SeedBatch = { folder: string; assets: { name: string; svg: string }[] };
+            const batches: SeedBatch[] = [
+                { folder: SEED_FOLDER_NAMES.astrology, assets: generateAstrologySvgs() },
+                { folder: SEED_FOLDER_NAMES.amino, assets: generateAminoSvgs() },
+                { folder: SEED_FOLDER_NAMES.ichingLines, assets: generateIChingStrokeSvgs() },
+            ];
+
+            for (const { folder: folderName, assets } of batches) {
+                // Skip if this seed folder already exists (idempotency).
+                const existing = get().assetFolders.find((f) => f.name === folderName);
+                if (existing) continue;
+
+                const folderId = await get().createAssetFolder(folderName);
+                if (!folderId) {
+                    console.warn(`Seed: failed to create folder "${folderName}"`);
+                    continue;
+                }
+
+                for (const asset of assets) {
+                    const blob = new Blob([asset.svg], { type: 'image/svg+xml' });
+                    const file = new File([blob], asset.name, { type: 'image/svg+xml' });
+                    await get().uploadAsset(folderId, file);
+                }
+            }
+        },
+
+        signedUrlForAsset: async (id: string) => {
+            const { user } = get();
+            if (!user) return null;
+
+            // Find storage_path locally if cached; otherwise round-trip to DB
+            let storagePath: string | undefined;
+            for (const list of Object.values(get().assetsByFolder)) {
+                const hit = list.find((a) => a.id === id);
+                if (hit) {
+                    storagePath = hit.storagePath;
+                    break;
+                }
+            }
+
+            if (!storagePath) {
+                const { data } = await supabase
+                    .from('assets')
+                    .select('storage_path')
+                    .eq('id', id)
+                    .eq('user_id', user.id)
+                    .maybeSingle();
+                storagePath = data?.storage_path;
+            }
+
+            if (!storagePath) return null;
+
+            const { data, error } = await supabase.storage
+                .from('v2-user-assets')
+                .createSignedUrl(storagePath, 60 * 60); // 1 hour
+
+            if (error) {
+                console.error('Failed to sign url', error);
+                return null;
+            }
+            return data?.signedUrl ?? null;
         },
 
         setGlobalLineColor: (color) => set((state) => ({

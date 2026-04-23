@@ -1,6 +1,6 @@
 import type { User, Session } from '@supabase/supabase-js';
 
-export type ShapeType = 'polygon' | 'star' | 'circle' | 'diamond' | 'vesica' | 'line' | 'custom' | 'molecule' | 'iching' | 'iching_lines' | 'polyhedron' | 'group' | 'astrology' | 'amino';
+export type ShapeType = 'polygon' | 'star' | 'circle' | 'diamond' | 'vesica' | 'line' | 'custom' | 'molecule' | 'iching' | 'iching_lines' | 'polyhedron' | 'group' | 'astrology' | 'amino' | 'asset_set' | 'asset_single';
 // export type KeyState = 'start' | 'middle' | 'end'; // Removed
 export type InternalLinesType = 'none' | 'center' | 'all';
 export type GridLayoutType = 'radial' | 'hexagonal' | 'linear' | '';
@@ -20,6 +20,28 @@ export interface Folder {
     id: string;
     name: string;
     isOpen: boolean; // For UI state
+}
+
+export type AssetMimeType = 'image/svg+xml' | 'image/png' | 'image/jpeg' | 'text/plain';
+
+export interface AssetFolder {
+    id: string;
+    name: string;
+    isOpen: boolean;
+    sortOrder: number;
+}
+
+export interface Asset {
+    id: string;
+    folderId: string | null;
+    name: string; // original filename
+    mimeType: AssetMimeType;
+    storagePath: string; // `{user_id}/{asset_id}.{ext}` in v2-user-assets
+    sizeBytes: number | null;
+    width: number | null;
+    height: number | null;
+    lastModified: number | null;
+    sortOrder: number | null;
 }
 
 export interface Profile {
@@ -187,6 +209,12 @@ export interface LayerConfig {
     ichingInputId?: number; // 1-64
     ichingHighlightIndex?: number; // 1-6 (0 for none)
 
+    // Asset Specific (Stage C)
+    // For 'asset_set': folder whose assets form the instance series (count = folder size).
+    // For 'asset_single': one asset used as the inner shape across instances.
+    assetFolderId?: string | null;
+    assetId?: string | null;
+
     // Group 2 Radial Specific
     radialArc2?: number; // 0-360
     alignToPath2?: boolean;
@@ -258,10 +286,24 @@ export interface AppState {
     project: Project;
     savedProjects: ProjectMetadata[];
     folders: Folder[];
+    assetFolders: AssetFolder[];
+    assetsByFolder: Record<string, Asset[]>; // keyed by assetFolder.id ('' for unfiled)
     user: User | null;
     session: Session | null;
     setUser: (session: Session | null) => void;
     signOut: () => Promise<void>;
+
+    // Asset Actions (Stage A)
+    fetchAssetFolders: () => Promise<void>;
+    createAssetFolder: (name: string) => Promise<string | undefined>;
+    renameAssetFolder: (id: string, name: string) => Promise<void>;
+    deleteAssetFolder: (id: string, deleteAssets?: boolean) => Promise<void>;
+    fetchAssets: (folderId: string | null) => Promise<Asset[]>;
+    uploadAsset: (folderId: string | null, file: File) => Promise<Asset | undefined>;
+    deleteAsset: (id: string) => Promise<void>;
+    reorderAssets: (folderId: string | null, startIndex: number, endIndex: number) => Promise<void>;
+    signedUrlForAsset: (id: string) => Promise<string | null>;
+    seedDefaultAssetFolders: () => Promise<void>;
 
     // Folder Actions
     createFolder: (name: string) => Promise<string | undefined>;

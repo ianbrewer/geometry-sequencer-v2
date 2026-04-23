@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { ChevronUp, Star, RotateCw, Maximize, Layers, Trash2, Anchor, Pentagon, Asterisk, Plus, Timer, Grid, Move, TrendingUp, Shuffle, Hash, Palette, Lock, Unlock } from 'lucide-react';
+import { ChevronUp, Star, RotateCw, Maximize, Layers, Trash2, Anchor, Pentagon, Asterisk, Plus, Timer, Grid, Move, TrendingUp, Shuffle, Hash, Palette, Lock, Unlock, FolderOpen, Image as ImageIcon } from 'lucide-react';
 import GradientEditor from './GradientEditor';
 import { MOLECULES } from '../data/molecules';
-import type { ShapeType, AnimatableProperties } from '../types';
+import type { ShapeType, AnimatableProperties, AssetFolder, Asset } from '../types';
 import BezierEditor from './BezierEditor';
 import { ModernToggle } from './ModernToggle';
 import { CustomColorPicker } from './CustomColorPicker';
@@ -110,6 +110,142 @@ const ScrubbableInput: React.FC<{
 
 
 
+// --- Asset Pickers (Stage D) ---------------------------------------------
+
+type AssetFolderPickerProps = {
+    selectedFolderId: string | null;
+    folders: AssetFolder[];
+    assetsByFolder: Record<string, Asset[]>;
+    fetchAssets: (folderId: string | null) => Promise<Asset[]>;
+    applyFolder: (folderId: string) => Promise<void>;
+};
+
+const AssetFolderPicker: React.FC<AssetFolderPickerProps> = ({
+    selectedFolderId, folders, assetsByFolder, fetchAssets, applyFolder
+}) => {
+    // Auto-fetch assets for the selected folder if we haven't loaded them yet
+    // (e.g. on project reload).
+    useEffect(() => {
+        if (selectedFolderId && !assetsByFolder[selectedFolderId]) {
+            fetchAssets(selectedFolderId);
+        }
+    }, [selectedFolderId, assetsByFolder, fetchAssets]);
+
+    const selected = folders.find(f => f.id === selectedFolderId);
+    const count = selectedFolderId ? (assetsByFolder[selectedFolderId]?.length ?? 0) : 0;
+
+    return (
+        <div className="space-y-2 pt-2 mt-2">
+            <div className="flex items-center justify-between mb-1">
+                <label className="text-[9px] uppercase font-bold text-white/40 flex items-center gap-1.5">
+                    <FolderOpen size={11} /> Asset Folder
+                </label>
+                {selected && (
+                    <span className="text-[9px] font-mono text-white/40">{count} assets</span>
+                )}
+            </div>
+            <div className="relative w-full">
+                <select
+                    value={selectedFolderId ?? ''}
+                    onChange={(e) => {
+                        const id = e.target.value;
+                        if (!id) return;
+                        applyFolder(id);
+                    }}
+                    className="w-full h-8 appearance-none bg-[#1A1A1A] border border-white/10 hover:border-white/30 rounded px-2 pl-3 text-[10px] text-white focus:outline-none"
+                >
+                    <option value="">— Select a folder —</option>
+                    {folders.map(f => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                    ))}
+                </select>
+                <div className="absolute right-2 top-2 pointer-events-none text-white/30">▼</div>
+            </div>
+            {folders.length === 0 && (
+                <div className="text-[9px] text-white/30 italic mt-1">
+                    No folders yet — create one in the Dashboard's Assets tab.
+                </div>
+            )}
+        </div>
+    );
+};
+
+type AssetPickerProps = {
+    selectedFolderId: string | null;
+    selectedAssetId: string | null;
+    folders: AssetFolder[];
+    assetsByFolder: Record<string, Asset[]>;
+    fetchAssets: (folderId: string | null) => Promise<Asset[]>;
+    onPick: (folderId: string, assetId: string) => void;
+};
+
+const AssetPicker: React.FC<AssetPickerProps> = ({
+    selectedFolderId, selectedAssetId, folders, assetsByFolder, fetchAssets, onPick
+}) => {
+    useEffect(() => {
+        if (selectedFolderId && !assetsByFolder[selectedFolderId]) {
+            fetchAssets(selectedFolderId);
+        }
+    }, [selectedFolderId, assetsByFolder, fetchAssets]);
+
+    const assets = selectedFolderId ? (assetsByFolder[selectedFolderId] ?? []) : [];
+
+    return (
+        <div className="space-y-2 pt-2 mt-2">
+            <div className="flex items-center justify-between mb-1">
+                <label className="text-[9px] uppercase font-bold text-white/40 flex items-center gap-1.5">
+                    <FolderOpen size={11} /> Folder
+                </label>
+            </div>
+            <div className="relative w-full">
+                <select
+                    value={selectedFolderId ?? ''}
+                    onChange={(e) => {
+                        const id = e.target.value;
+                        if (!id) return;
+                        if (!assetsByFolder[id]) fetchAssets(id);
+                        // switching folder clears the assetId until the user picks one
+                        onPick(id, '');
+                    }}
+                    className="w-full h-8 appearance-none bg-[#1A1A1A] border border-white/10 hover:border-white/30 rounded px-2 pl-3 text-[10px] text-white focus:outline-none"
+                >
+                    <option value="">— Select a folder —</option>
+                    {folders.map(f => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                    ))}
+                </select>
+                <div className="absolute right-2 top-2 pointer-events-none text-white/30">▼</div>
+            </div>
+
+            <div className="flex items-center justify-between mb-1 mt-2">
+                <label className="text-[9px] uppercase font-bold text-white/40 flex items-center gap-1.5">
+                    <ImageIcon size={11} /> Asset
+                </label>
+            </div>
+            <div className="relative w-full">
+                <select
+                    value={selectedAssetId ?? ''}
+                    disabled={!selectedFolderId}
+                    onChange={(e) => {
+                        const aid = e.target.value;
+                        if (!aid || !selectedFolderId) return;
+                        onPick(selectedFolderId, aid);
+                    }}
+                    className="w-full h-8 appearance-none bg-[#1A1A1A] border border-white/10 hover:border-white/30 rounded px-2 pl-3 text-[10px] text-white focus:outline-none disabled:opacity-50"
+                >
+                    <option value="">{selectedFolderId ? '— Select an asset —' : '— Pick a folder first —'}</option>
+                    {assets.map(a => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                </select>
+                <div className="absolute right-2 top-2 pointer-events-none text-white/30">▼</div>
+            </div>
+        </div>
+    );
+};
+
+// -------------------------------------------------------------------------
+
 // Helper for labels
 const ControlSlider: React.FC<any> = ({ label, value, onChange, min, max, step, icon, defaultValue, disabled }) => (
     <div className={`flex items-center justify-between mb-1 ${disabled ? 'opacity-50' : ''}`}>
@@ -133,7 +269,8 @@ const Inspector: React.FC = () => {
     const {
         project, activeLayerId, activeKeyframeId,
         updateLayer, updateProject, updateKeyframe, addKeyframe,
-        deleteKeyframe, setGlobalLineColor
+        deleteKeyframe, setGlobalLineColor,
+        assetFolders, assetsByFolder, fetchAssets
     } = useStore(s => s);
 
     const activeLayer = project.layers.find((l) => l.id === activeLayerId);
@@ -213,6 +350,34 @@ const Inspector: React.FC = () => {
     const setConfigValue = (key: string, val: any, skipHistory = false) => {
         if (!activeLayer) return;
         updateLayer(activeLayer.id, { config: { ...activeLayer.config, [key]: val } }, skipHistory);
+    };
+
+    // Attach a folder to an asset_set layer. Defaults: 360° radial orbit at
+    // spread 300 with alignToPath on, no linear spacing.
+    const applyAssetSetFolder = async (folderId: string) => {
+        if (!activeLayer) return;
+        if (!assetsByFolder[folderId]) {
+            await fetchAssets(folderId);
+        }
+
+        const updatedKeyframes = activeLayer.keyframes.map(kf => ({
+            ...kf,
+            value: {
+                ...kf.value,
+                orbitRadius: 300,
+                spacingX: 0,
+                spacingY: 0,
+            }
+        }));
+        updateLayer(activeLayer.id, {
+            config: {
+                ...activeLayer.config,
+                assetFolderId: folderId,
+                alignToPath: true,
+                radialArc: 360,
+            },
+            keyframes: updatedKeyframes
+        });
     };
 
     const isPropertyOverridden = () => {
@@ -492,10 +657,13 @@ const Inspector: React.FC = () => {
                                         <option value="line">Line</option>
                                         <option value="molecule">Molecule</option>
                                         <option value="iching">I-Ching</option>
-                                        <option value="iching_lines">I-Ching (Strokes)</option>
-                                        <option value="astrology">Astrology</option>
-                                        <option value="amino">Amino Acids</option>
-                                        <option value="custom">Custom (SVG)</option>
+                                        <option value="asset_set">Asset Folder</option>
+                                        <option value="asset_single">Asset (Single)</option>
+                                        {/* Legacy types: only shown when already in use so projects keep rendering; new layers should use Asset Folder. */}
+                                        {activeLayer?.type === 'iching_lines' && <option value="iching_lines">I-Ching (Strokes)</option>}
+                                        {activeLayer?.type === 'astrology' && <option value="astrology">Astrology</option>}
+                                        {activeLayer?.type === 'amino' && <option value="amino">Amino Acids</option>}
+                                        {activeLayer?.type === 'custom' && <option value="custom">Custom (SVG)</option>}
                                     </select>
                                     <div className="absolute right-2 top-2 pointer-events-none text-white/30">▼</div>
                                 </div>
@@ -672,6 +840,32 @@ const Inspector: React.FC = () => {
                                         )}    </div>
                                 )
                             }
+
+                            {activeLayer?.type === 'asset_set' && (
+                                <AssetFolderPicker
+                                    selectedFolderId={activeLayer.config?.assetFolderId ?? null}
+                                    folders={assetFolders}
+                                    assetsByFolder={assetsByFolder}
+                                    fetchAssets={fetchAssets}
+                                    applyFolder={applyAssetSetFolder}
+                                />
+                            )}
+
+                            {activeLayer?.type === 'asset_single' && (
+                                <AssetPicker
+                                    selectedFolderId={activeLayer.config?.assetFolderId ?? null}
+                                    selectedAssetId={activeLayer.config?.assetId ?? null}
+                                    folders={assetFolders}
+                                    assetsByFolder={assetsByFolder}
+                                    fetchAssets={fetchAssets}
+                                    onPick={(folderId, assetId) => {
+                                        if (!activeLayer) return;
+                                        updateLayer(activeLayer.id, {
+                                            config: { ...activeLayer.config, assetFolderId: folderId, assetId }
+                                        });
+                                    }}
+                                />
+                            )}
 
                             <div className="w-full h-px bg-white/5 my-3" />
 
@@ -1032,7 +1226,21 @@ const Inspector: React.FC = () => {
                         {(expandedSections.layout ?? true) && (
                             <div className="p-3 space-y-2">
                                 {/* COUNT */}
-                                <ControlSlider label="Count" value={activeLayer?.type === 'astrology' ? 12 : activeLayer?.type === 'amino' ? 20 : activeLayer?.type === 'iching_lines' ? 64 : activeLayer?.config?.instances} min={1} max={100} step={1} icon={<Hash size={12} />} onChange={(v: number, skip?: boolean) => setConfigValue('instances', v, skip)} isFixed disabled={activeLayer?.type === 'astrology' || activeLayer?.type === 'amino' || activeLayer?.type === 'iching_lines'} />
+                                <ControlSlider
+                                    label="Count"
+                                    value={
+                                        activeLayer?.type === 'astrology' ? 12
+                                            : activeLayer?.type === 'amino' ? 20
+                                                : activeLayer?.type === 'iching_lines' ? 64
+                                                    : activeLayer?.type === 'asset_set'
+                                                        ? Math.max(1, (activeLayer?.config?.assetFolderId ? (assetsByFolder[activeLayer.config.assetFolderId]?.length ?? 0) : 0))
+                                                        : activeLayer?.config?.instances
+                                    }
+                                    min={1} max={100} step={1} icon={<Hash size={12} />}
+                                    onChange={(v: number, skip?: boolean) => setConfigValue('instances', v, skip)}
+                                    isFixed
+                                    disabled={activeLayer?.type === 'astrology' || activeLayer?.type === 'amino' || activeLayer?.type === 'iching_lines' || activeLayer?.type === 'asset_set'}
+                                />
 
                                 {/* SPAN & ALIGN */}
                                 <div className="flex justify-between items-center px-1 mt-2 mb-1 border-t border-white/5 pt-2">
