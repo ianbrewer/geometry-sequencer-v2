@@ -41,6 +41,7 @@ export interface Asset {
     width: number | null;
     height: number | null;
     lastModified: number | null;
+    sortOrder: number | null;
 }
 
 export interface Profile {
@@ -300,6 +301,7 @@ export interface AppState {
     fetchAssets: (folderId: string | null) => Promise<Asset[]>;
     uploadAsset: (folderId: string | null, file: File) => Promise<Asset | undefined>;
     deleteAsset: (id: string) => Promise<void>;
+    reorderAssets: (folderId: string | null, startIndex: number, endIndex: number) => Promise<void>;
     signedUrlForAsset: (id: string) => Promise<string | null>;
     seedDefaultAssetFolders: () => Promise<void>;
 

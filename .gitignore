@@ -6,3 +6,10 @@ dist-ssr
 .npmrc
 .yarnrc
 .vite
+
+# Generated from tasks.tsv via scripts/tasks_to_xlsx.py
+Task list.xlsx
+
+.playwright-mcp/
+scripts/__pycache__/
+scripts/taskboard/node_modules/

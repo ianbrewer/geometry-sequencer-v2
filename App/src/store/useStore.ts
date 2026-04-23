@@ -1653,33 +1653,42 @@ export const useStore = create<AppState>((set, get) => {
             const { user } = get();
             if (!user) return [];
 
+            type AssetRow = {
+                id: string;
+                folder_id: string | null;
+                name: string;
+                mime_type: AssetMimeType;
+                storage_path: string;
+                size_bytes: number | null;
+                width: number | null;
+                height: number | null;
+                last_modified: number | null;
+                sort_order?: number | null;
+            };
+
+            const runQuery = async (withSortOrder: boolean) => {
+                const cols = withSortOrder
+                    ? 'id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified, sort_order'
+                    : 'id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified';
+                let q = supabase.from('assets').select(cols).eq('user_id', user.id);
+                q = withSortOrder ? q.order('sort_order', { ascending: true, nullsFirst: false }) : q;
+                q = q.order('name', { ascending: true });
+                q = folderId === null ? q.is('folder_id', null) : q.eq('folder_id', folderId);
+                return q;
+            };
+
             try {
-                let query = supabase
-                    .from('assets')
-                    .select('id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified')
-                    .eq('user_id', user.id)
-                    .order('name', { ascending: true });
-
-                query = folderId === null ? query.is('folder_id', null) : query.eq('folder_id', folderId);
-
-                const { data, error } = await query;
+                let { data, error } = await runQuery(true);
+                // Fallback when the migration hasn't been applied yet: retry without sort_order.
+                if (error && error.code === '42703') {
+                    ({ data, error } = await runQuery(false));
+                }
                 if (error && error.code !== '42P01') {
                     console.error('Failed to fetch assets', error);
                     return [];
                 }
 
-                type AssetRow = {
-                    id: string;
-                    folder_id: string | null;
-                    name: string;
-                    mime_type: AssetMimeType;
-                    storage_path: string;
-                    size_bytes: number | null;
-                    width: number | null;
-                    height: number | null;
-                    last_modified: number | null;
-                };
-                const assets: Asset[] = (data || []).map((a: AssetRow) => ({
+                const assets: Asset[] = ((data as AssetRow[] | null) || []).map((a) => ({
                     id: a.id,
                     folderId: a.folder_id,
                     name: a.name,
@@ -1689,6 +1698,7 @@ export const useStore = create<AppState>((set, get) => {
                     width: a.width ?? null,
                     height: a.height ?? null,
                     lastModified: a.last_modified ?? null,
+                    sortOrder: a.sort_order ?? null,
                 }));
 
                 const key = folderId ?? '';
@@ -1757,6 +1767,15 @@ export const useStore = create<AppState>((set, get) => {
                     });
                 if (uploadError) throw uploadError;
 
+                // Land new uploads at the end of the folder. Base on the current cache (which
+                // already reflects any uploads still in flight from the same batch).
+                const cacheKey = folderId ?? '';
+                const existing = get().assetsByFolder[cacheKey] || [];
+                const nextSortOrder = existing.reduce(
+                    (max, a) => (a.sortOrder != null && a.sortOrder > max ? a.sortOrder : max),
+                    -1,
+                ) + 1;
+
                 const now = Date.now();
                 const { data: row, error: rowError } = await supabase
                     .from('assets')
@@ -1771,8 +1790,9 @@ export const useStore = create<AppState>((set, get) => {
                         width,
                         height,
                         last_modified: now,
+                        sort_order: nextSortOrder,
                     })
-                    .select('id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified')
+                    .select('id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified, sort_order')
                     .single();
 
                 if (rowError) {
@@ -1791,13 +1811,13 @@ export const useStore = create<AppState>((set, get) => {
                     width: row.width ?? null,
                     height: row.height ?? null,
                     lastModified: row.last_modified ?? null,
+                    sortOrder: row.sort_order ?? null,
                 };
 
-                const key = folderId ?? '';
                 set((state) => ({
                     assetsByFolder: {
                         ...state.assetsByFolder,
-                        [key]: [...(state.assetsByFolder[key] || []), asset].sort((a, b) => a.name.localeCompare(b.name)),
+                        [cacheKey]: [...(state.assetsByFolder[cacheKey] || []), asset],
                     },
                 }));
 
@@ -1855,15 +1875,56 @@ export const useStore = create<AppState>((set, get) => {
                 if (error) throw error;
             } catch (e) {
                 console.error('Failed to delete asset', e);
-                // Restore on failure
+                // Restore on failure, preserving manual sort order.
                 if (found && foundKey !== undefined) {
                     set((state) => ({
                         assetsByFolder: {
                             ...state.assetsByFolder,
-                            [foundKey!]: [...(state.assetsByFolder[foundKey!] || []), found!].sort((a, b) => a.name.localeCompare(b.name)),
+                            [foundKey!]: [...(state.assetsByFolder[foundKey!] || []), found!].sort((a, b) => {
+                                const ao = a.sortOrder;
+                                const bo = b.sortOrder;
+                                if (ao == null && bo == null) return a.name.localeCompare(b.name);
+                                if (ao == null) return 1;
+                                if (bo == null) return -1;
+                                return ao - bo;
+                            }),
                         },
                     }));
                 }
+            }
+        },
+
+        reorderAssets: async (folderId: string | null, startIndex: number, endIndex: number) => {
+            const { user } = get();
+            if (!user) return;
+            if (startIndex === endIndex) return;
+
+            const key = folderId ?? '';
+            const prev = get().assetsByFolder[key] || [];
+            if (startIndex < 0 || startIndex >= prev.length || endIndex < 0 || endIndex >= prev.length) return;
+
+            const reordered = [...prev];
+            const [moved] = reordered.splice(startIndex, 1);
+            reordered.splice(endIndex, 0, moved);
+
+            // Optimistic: reassign sort_order to the full list sequentially so
+            // every row has a stable index (no NULL gaps left behind).
+            const withOrder: Asset[] = reordered.map((a, i) => ({ ...a, sortOrder: i }));
+
+            set((state) => ({
+                assetsByFolder: { ...state.assetsByFolder, [key]: withOrder },
+            }));
+
+            try {
+                await Promise.all(withOrder.map((a, i) =>
+                    supabase.from('assets').update({ sort_order: i }).eq('id', a.id).eq('user_id', user.id)
+                ));
+            } catch (e) {
+                console.error('Failed to reorder assets', e);
+                // Rollback to previous order
+                set((state) => ({
+                    assetsByFolder: { ...state.assetsByFolder, [key]: prev },
+                }));
             }
         },
 

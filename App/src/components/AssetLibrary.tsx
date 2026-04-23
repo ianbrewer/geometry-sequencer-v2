@@ -9,6 +9,20 @@ import {
     Loader2,
     AlertCircle,
 } from 'lucide-react';
+import {
+    DndContext,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    closestCenter,
+    type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+    SortableContext,
+    rectSortingStrategy,
+    useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useStore } from '../store/useStore';
 import type { Asset, AssetFolder, AssetMimeType } from '../types';
 
@@ -112,7 +126,11 @@ const FolderRow = ({
                 />
             ) : (
                 <>
-                    <span className={`flex-1 text-xs truncate ${selected ? 'text-white' : 'text-white/70 group-hover:text-white'}`}>
+                    <span
+                        className={`flex-1 text-xs truncate ${selected ? 'text-white' : 'text-white/70 group-hover:text-white'}`}
+                        onDoubleClick={(e) => { e.stopPropagation(); setRenaming(true); setName(folder.name); }}
+                        title="Double-click to rename"
+                    >
                         {folder.name}
                     </span>
                     <span className="text-[10px] text-white/30">{count}</span>
@@ -148,6 +166,19 @@ const AssetLibrary: React.FC = () => {
     const deleteAssetFolder = useStore(s => s.deleteAssetFolder);
     const uploadAsset = useStore(s => s.uploadAsset);
     const deleteAsset = useStore(s => s.deleteAsset);
+    const reorderAssets = useStore(s => s.reorderAssets);
+
+    // Distance activation keeps a plain click on the delete button from becoming a drag.
+    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+        const startIndex = currentAssets.findIndex(a => a.id === active.id);
+        const endIndex = currentAssets.findIndex(a => a.id === over.id);
+        if (startIndex === -1 || endIndex === -1) return;
+        reorderAssets(selectedFolderId, startIndex, endIndex);
+    };
 
     // null means the virtual "Unfiled" folder (folder_id IS NULL in DB).
     const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -347,11 +378,15 @@ const AssetLibrary: React.FC = () => {
                         <p className="text-[9px] mt-1">SVG, PNG, or JPEG</p>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-3 gap-2">
-                        {currentAssets.map(asset => (
-                            <AssetTile key={asset.id} asset={asset} onDelete={() => deleteAsset(asset.id)} />
-                        ))}
-                    </div>
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                        <SortableContext items={currentAssets.map(a => a.id)} strategy={rectSortingStrategy}>
+                            <div className="grid grid-cols-3 gap-2">
+                                {currentAssets.map(asset => (
+                                    <AssetTile key={asset.id} asset={asset} onDelete={() => deleteAsset(asset.id)} />
+                                ))}
+                            </div>
+                        </SortableContext>
+                    </DndContext>
                 )}
             </div>
 
@@ -407,15 +442,47 @@ const AssetLibrary: React.FC = () => {
 
 const AssetTile = ({ asset, onDelete }: { asset: Asset; onDelete: () => void }) => {
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: asset.id });
+
+    const style: React.CSSProperties = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+        zIndex: isDragging ? 10 : undefined,
+    };
+
+    const stopDrag = (e: React.PointerEvent) => e.stopPropagation();
+
     return (
-        <div className="group relative aspect-square rounded border border-white/5 bg-[#252525] overflow-hidden hover:border-[#D4AF37]/50 transition-colors">
-            <div className="absolute inset-0 p-2">
+        <div
+            ref={setNodeRef}
+            style={style}
+            {...attributes}
+            {...listeners}
+            className="group relative aspect-square rounded border border-white/5 bg-[#252525] overflow-hidden hover:border-[#D4AF37]/50 transition-colors cursor-grab active:cursor-grabbing touch-none"
+        >
+            {/* Checkerboard so both black- and white-line SVGs read clearly. */}
+            <div
+                className="absolute inset-0 p-2 pointer-events-none"
+                style={{
+                    backgroundColor: '#8a8a8a',
+                    backgroundImage: 'conic-gradient(#6f6f6f 25%, transparent 0 50%, #6f6f6f 0 75%, transparent 0)',
+                    backgroundSize: '12px 12px',
+                }}
+            >
                 <Thumbnail asset={asset} />
             </div>
             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-2 py-1 pointer-events-none">
                 <p className="text-[9px] text-white/70 truncate" title={asset.name}>{asset.name}</p>
             </div>
-            <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity" onPointerDown={stopDrag}>
                 {confirmDelete ? (
                     <div className="flex items-center gap-1 bg-black/80 rounded px-1 py-0.5">
                         <button

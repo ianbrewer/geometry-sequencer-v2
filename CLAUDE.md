@@ -9,6 +9,7 @@ v2 of Sacred Geometry Sequencer — parallel app sharing v1's Supabase backend (
 - **v2 live:** https://geometry-sequencer-v2.vercel.app
 - **Supabase project:** `ttalbvgdxtnyppighwgf` (shared with v1)
 - **Follow-ups:** [TODO.md](./TODO.md) — check before starting new work; append there when tasks get deferred
+- **Granular task list:** [tasks.tsv](./tasks.tsv) is the canonical source (seeded from an Asana export). Edit this file directly. Regenerate the human-facing [Task list.xlsx](./Task%20list.xlsx) (with dropdowns + filters) via `python3 scripts/tasks_to_xlsx.py`. If edits happen in the xlsx, sync back with `python3 scripts/xlsx_to_tasks.py`. Schema + dropdown options: [scripts/tasks_schema.py](./scripts/tasks_schema.py).
 
 ## Critical: schema ownership
 

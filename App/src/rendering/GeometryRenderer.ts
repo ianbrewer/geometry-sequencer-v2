@@ -1,5 +1,6 @@
 import { Application, Container, Graphics, BlurFilter, Color, Sprite, NoiseFilter, DisplacementFilter, Texture } from 'pixi.js';
 import { assetCache, type AssetEntry } from './AssetCache';
+import { buildColorKey, type SvgRecolorOptions } from '../utils/svgRecolor';
 import { GlowFilter } from 'pixi-filters/glow';
 import { ShockwaveFilter } from 'pixi-filters/shockwave';
 import { TwistFilter } from 'pixi-filters/twist';
@@ -463,10 +464,28 @@ export class GeometryRenderer {
                         const wrapper = this.getContainer();
                         const id = resolveAssetId(i);
                         if (!id) return wrapper;
-                        const texture = assetCache.getTextureSync(id);
+                        const recolorOpts: SvgRecolorOptions = {
+                            fillEnabled: effectiveConfig.fillEnabled,
+                            fillColor: effectiveConfig.fillColor,
+                            strokeEnabled: effectiveConfig.strokeEnabled,
+                            strokeColor: effectiveConfig.strokeColor,
+                            gradientEnabled: effectiveConfig.gradientEnabled,
+                            gradientStops: effectiveConfig.gradientStops,
+                        };
+                        const colorKey = buildColorKey(recolorOpts);
+                        // For SVGs, the recolored variant is rasterized from rewritten source.
+                        // For rasters, the base texture is always used — any fillColor
+                        // override is applied as a sprite tint below.
+                        const useVariant = colorKey && assetCache.isSvg(id);
+                        const texture = useVariant
+                            ? assetCache.getTextureSync(id, colorKey, recolorOpts)
+                            : assetCache.getTextureSync(id);
                         if (!texture) return wrapper; // loading; retry next frame
                         const sprite = new Sprite(texture);
                         sprite.anchor.set(0.5);
+                        if (!useVariant && effectiveConfig.fillEnabled && effectiveConfig.fillColor) {
+                            sprite.tint = new Color(effectiveConfig.fillColor).toNumber();
+                        }
                         // Respect original aspect ratio — fit the sprite's bounding box inside
                         // the layer's radius while preserving the texture's width:height ratio.
                         const texW = texture.width || 1;
