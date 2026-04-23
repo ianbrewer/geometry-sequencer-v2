@@ -73,6 +73,13 @@ class AssetCacheImpl {
                 tex = await Assets.load<Texture>({ src: dataUrl, data: { resolution: SVG_RASTER_RESOLUTION } });
             } else {
                 tex = await Assets.load<Texture>(info.url);
+                // Raster sources (e.g. 500×500 PNGs) get heavily minified for small
+                // sprites. Mipmaps kill the aliasing; anisotropy keeps them sharp
+                // (plain trilinear blurs too much at typical icon sizes).
+                tex.source.autoGenerateMipmaps = true;
+                tex.source.style.scaleMode = 'linear';
+                tex.source.style.maxAnisotropy = 16;
+                tex.source.updateMipmaps();
             }
             this.textures.set(assetId, tex);
             return tex;
