@@ -11,6 +11,7 @@ import Player from './components/Player';
 import LandingPage from './components/LandingPage';
 import { supabase } from './supabaseClient';
 import { assetCache } from './rendering/AssetCache';
+import { TooltipProvider, TooltipOverlay } from './components/InspectorTooltip';
 
 const App: React.FC = () => {
   // useAnimation(); // Moved to GeometryCanvas internally
@@ -123,6 +124,7 @@ const App: React.FC = () => {
   if (currentView === 'landing') return <LandingPage />;
 
   return (
+    <TooltipProvider>
     <div className="h-screen w-screen bg-[#1a1a1a] text-white flex flex-col font-sans selection:bg-[#D4AF37]/30">
       <TopBar />
 
@@ -131,6 +133,7 @@ const App: React.FC = () => {
         <div className="flex-1 flex flex-col min-w-0 border-r border-white/10 min-h-0 relative z-0">
           <div className="flex-1 relative bg-black min-h-0 overflow-hidden">
             <GeometryCanvas />
+            <TooltipOverlay />
           </div>
 
           <div
@@ -158,6 +161,7 @@ const App: React.FC = () => {
         </aside>
       </main>
     </div>
+    </TooltipProvider>
   );
 };
 
