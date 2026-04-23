@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#
+# Geometry Sequencer pre-commit hook.
+#
+# The HTML / React Native exporters ship App/public/{player,pixi-bundle,
+# astro-data,amino-data}.js as committed build artifacts. The editor itself
+# bundles src/ via the main vite config, so it never notices when these
+# artifacts go stale — only the exports break, and only at runtime in the
+# user's browser. This hook detects staged source changes and rebuilds the
+# matching bundles before the commit lands.
+#
+# Skip with `git commit --no-verify` (don't make a habit of it).
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+staged=$(git diff --cached --name-only --diff-filter=AM)
+[[ -z "$staged" ]] && exit 0
+
+needs_pixi=false
+needs_astro=false
+needs_amino=false
+needs_player=false
+
+while IFS= read -r f; do
+    case "$f" in
+        App/src/pixi-entry.ts)
+            needs_pixi=true ;;
+        App/src/astro-entry.ts | App/src/data/astro.ts)
+            needs_astro=true ;;
+        App/src/amino-entry.ts | App/src/data/amino.ts)
+            needs_amino=true ;;
+        App/src/player.ts | App/src/data/molecules.ts)
+            needs_player=true ;;
+        App/src/rendering/* | App/src/utils/* | App/src/constants/* | App/src/types/*)
+            needs_player=true ;;
+    esac
+done <<< "$staged"
+
+if ! $needs_pixi && ! $needs_astro && ! $needs_amino && ! $needs_player; then
+    exit 0
+fi
+
+cd App
+
+run_build() {
+    local target="$1"
+    local out="$2"
+    printf '  rebuilding public/%s ... ' "$out"
+    if output=$(npm run "build:$target" --silent 2>&1); then
+        echo "ok"
+    else
+        echo "FAILED"
+        echo "$output" >&2
+        echo "" >&2
+        echo "✗ pre-commit: build:$target failed — aborting commit." >&2
+        echo "  Fix the build error, or rerun with --no-verify if intentional." >&2
+        exit 1
+    fi
+}
+
+echo "↺ pre-commit: source change detected, rebuilding bundles"
+$needs_pixi   && run_build pixi   pixi-bundle.js
+$needs_astro  && run_build astro  astro-data.js
+$needs_amino  && run_build amino  amino-data.js
+$needs_player && run_build player player.js
+
+cd "$REPO_ROOT"
+
+# Re-stage rebuilt bundles so they land in this commit.
+$needs_pixi   && git add App/public/pixi-bundle.js
+$needs_astro  && git add App/public/astro-data.js
+$needs_amino  && git add App/public/amino-data.js
+$needs_player && git add App/public/player.js
+
+echo "✓ pre-commit: bundles up to date"

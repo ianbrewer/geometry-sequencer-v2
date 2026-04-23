@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { X, Film, Download, FileCode, Check, FileJson, Share2, Code2, Smartphone } from 'lucide-react';
 import { useRecorder } from '../hooks/useRecorder';
 import { useStore } from '../store/useStore';
+import { supabase } from '../supabaseClient';
 import { EXPORT_TEMPLATES, REACT_NATIVE_TEMPLATES } from '../data/exportTemplates';
+import type { Project, Asset, AssetMimeType } from '../types';
 import JSZip from 'jszip';
 
 interface ExportModalProps {
@@ -10,6 +12,166 @@ interface ExportModalProps {
 }
 
 import { ModernToggle } from './ModernToggle';
+
+// ─── Asset bundling helpers (shared by HTML + RN exports) ──────────────
+//
+// asset_set / asset_single layers reference Supabase Storage assets by id
+// (and asset_set additionally by folder id). For exports to render those
+// layers offline, we fetch the actual blobs and ship them with the bundle:
+//   - HTML: written to assets/<id>.<ext>, registry points at relative paths
+//   - RN:   inlined as base64 data URLs since the WebView is sandboxed
+//
+// The runtime player consumes the registry via window.GEOMETRY_ASSETS.
+
+type CollectedAsset = {
+    id: string;
+    mimeType: AssetMimeType;
+    storagePath: string;
+    blob: Blob;
+    extension: string;
+};
+
+type CollectedExport = {
+    assets: CollectedAsset[];
+    folders: Record<string, string[]>; // ordered asset ids per folder id
+};
+
+const extensionForMime = (mime: AssetMimeType): string => {
+    switch (mime) {
+        case 'image/svg+xml': return 'svg';
+        case 'image/png':     return 'png';
+        case 'image/jpeg':    return 'jpg';
+        case 'text/plain':    return 'txt';
+        default:              return 'bin';
+    }
+};
+
+const blobToBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error);
+        reader.onload = () => {
+            const result = reader.result as string;
+            // result is `data:<mime>;base64,<b64>` — strip the prefix
+            const comma = result.indexOf(',');
+            resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.readAsDataURL(blob);
+    });
+
+// Walks the project, fetches every asset referenced by asset_set / asset_single
+// layers (including all assets in any referenced folder, in order), and returns
+// them as in-memory blobs ready to be written into a zip.
+async function collectExportAssets(
+    project: Project,
+    onStatus: (msg: string) => void,
+): Promise<CollectedExport> {
+    const folderIds = new Set<string>();
+    const singleAssetIds = new Set<string>();
+
+    for (const layer of project.layers) {
+        if (layer.type === 'asset_set' && layer.config.assetFolderId) {
+            folderIds.add(layer.config.assetFolderId);
+        } else if (layer.type === 'asset_single' && layer.config.assetId) {
+            singleAssetIds.add(layer.config.assetId);
+        }
+    }
+
+    if (folderIds.size === 0 && singleAssetIds.size === 0) {
+        return { assets: [], folders: {} };
+    }
+
+    const store = useStore.getState();
+    const { user } = store;
+    if (!user) throw new Error('You must be signed in to export assets.');
+
+    // 1) Hydrate assetsByFolder for every referenced folder.
+    onStatus('Loading asset folders...');
+    const folders: Record<string, string[]> = {};
+    const assetMeta = new Map<string, Asset>();
+
+    for (const folderId of folderIds) {
+        const list = await store.fetchAssets(folderId);
+        folders[folderId] = list.map(a => a.id);
+        for (const a of list) assetMeta.set(a.id, a);
+    }
+
+    // 2) Resolve asset_single ids that weren't pulled in via a folder.
+    const missingSingleIds = [...singleAssetIds].filter(id => !assetMeta.has(id));
+    if (missingSingleIds.length) {
+        const { data, error } = await supabase
+            .from('assets')
+            .select('id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified')
+            .eq('user_id', user.id)
+            .in('id', missingSingleIds);
+        if (error) throw new Error(`Failed to load asset metadata: ${error.message}`);
+        for (const row of (data ?? []) as Array<{
+            id: string; folder_id: string | null; name: string;
+            mime_type: AssetMimeType; storage_path: string;
+            size_bytes: number | null; width: number | null;
+            height: number | null; last_modified: number | null;
+        }>) {
+            assetMeta.set(row.id, {
+                id: row.id,
+                folderId: row.folder_id,
+                name: row.name,
+                mimeType: row.mime_type,
+                storagePath: row.storage_path,
+                sizeBytes: row.size_bytes,
+                width: row.width,
+                height: row.height,
+                lastModified: row.last_modified,
+                sortOrder: null,
+            });
+        }
+    }
+
+    // 3) Build the dedup'd id list: folder assets + asset_single ids.
+    const allIds = new Set<string>();
+    for (const ids of Object.values(folders)) for (const id of ids) allIds.add(id);
+    for (const id of singleAssetIds) allIds.add(id);
+
+    // 4) Fetch each blob via a signed URL. Run in parallel — the bucket is
+    //    behind RLS and signed-URL minting is per-asset, but blob fetches
+    //    themselves go straight to Supabase Storage CDN.
+    const idList = [...allIds];
+    onStatus(`Fetching ${idList.length} asset${idList.length === 1 ? '' : 's'}...`);
+
+    let completed = 0;
+    const collected: CollectedAsset[] = await Promise.all(
+        idList.map(async (id) => {
+            const meta = assetMeta.get(id);
+            if (!meta) throw new Error(`Asset ${id} referenced by project but not found.`);
+            const url = await store.signedUrlForAsset(id);
+            if (!url) throw new Error(`Could not get download URL for asset ${meta.name}.`);
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`Failed to download ${meta.name}: HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            completed += 1;
+            onStatus(`Fetched ${completed}/${idList.length} assets...`);
+            return {
+                id: meta.id,
+                mimeType: meta.mimeType,
+                storagePath: meta.storagePath,
+                blob,
+                extension: extensionForMime(meta.mimeType),
+            };
+        })
+    );
+
+    return { assets: collected, folders };
+}
+
+// Total count of layers that will need bundled assets to render.
+const countAssetLayers = (project: Project): number =>
+    project.layers.reduce(
+        (n, l) => n + (
+            (l.type === 'asset_set' && l.config.assetFolderId) ||
+            (l.type === 'asset_single' && l.config.assetId)
+                ? 1 : 0
+        ),
+        0
+    );
 
 const ExportModal: React.FC<ExportModalProps> = ({ onClose }) => {
     const { startRecording, stopRecording, downloadVideo, getSupportedMimeTypes } = useRecorder();
@@ -21,6 +183,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ onClose }) => {
     const usesAstro = project.layers.some((l: any) => l.type === 'astrology');
     const usesAmino = project.layers.some((l: any) => l.type === 'amino');
     const usesCustomSvg = project.layers.some((l: any) => l.type === 'custom');
+    const assetLayerCount = countAssetLayers(project);
     const [includeAstro, setIncludeAstro] = useState(false);
     const [includeAmino, setIncludeAmino] = useState(false);
 
@@ -181,11 +344,35 @@ const ExportModal: React.FC<ExportModalProps> = ({ onClose }) => {
                 if (res.ok) aminoScript = await res.text();
             }
 
-            // 2. Prepare Filenames
+            // 2. Collect every asset_set/asset_single asset referenced by the
+            //    project. Inline each blob as a base64 data URL — file:// loads
+            //    block fetch() in Chrome/Safari, so loose ./assets/<id>.<ext>
+            //    files would render as a black screen when users double-click
+            //    the unzipped index.html. Data URLs work under file:// and
+            //    keep the export self-contained.
+            const collected = await collectExportAssets(project, setStatus);
+
+            const registryAssets: Record<string, { url: string; mimeType: string }> = {};
+            for (const a of collected.assets) {
+                const b64 = await blobToBase64(a.blob);
+                registryAssets[a.id] = {
+                    url: `data:${a.mimeType};base64,${b64}`,
+                    mimeType: a.mimeType,
+                };
+            }
+
+            const hasAssets = collected.assets.length > 0;
+            const assetsRegistryJs = hasAssets
+                ? `// Auto-generated. Sets window.GEOMETRY_ASSETS so the player can\n// resolve asset_set / asset_single layers offline. Loaded before player.js.\nwindow.GEOMETRY_ASSETS = ${JSON.stringify({ assets: registryAssets, folders: collected.folders })};\n`
+                : '';
+
+            setStatus('Bundling...');
+
+            // 3. Prepare Filenames
             const safeName = project.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
             const jsonFilename = `${safeName}.json`;
 
-            // 3. Create index.html
+            // 4. Create index.html
             const htmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -207,6 +394,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ onClose }) => {
     <script src="pixi-bundle.js"></script>
 ${includeAstro ? '    <!-- Astro Symbol SVG Data (optional) -->\n    <script src="astro-data.js"></script>\n' : ''}\
 ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="amino-data.js"></script>\n' : ''}\
+${hasAssets ? '    <!-- Asset Registry (asset_set / asset_single, inlined as data URLs) -->\n    <script src="assets-registry.js"></script>\n' : ''}\
     <script>
         // Ensure optional dependencies don't throw ReferenceErrors if omitted
         window.ASTRO_DATA = window.ASTRO_DATA || undefined;
@@ -257,18 +445,19 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
 </body>
 </html>`;
 
-            // 4. Add to Zip
+            // 5. Add to Zip
             zip.file('index.html', htmlContent);
             zip.file('pixi-bundle.js', pixiScript);
             if (includeAstro && astroScript) zip.file('astro-data.js', astroScript);
             if (includeAmino && aminoScript) zip.file('amino-data.js', aminoScript);
+            if (hasAssets) zip.file('assets-registry.js', assetsRegistryJs);
             zip.file('player.js', playerScript);
             zip.file(jsonFilename, JSON.stringify(project, null, 2));
 
-            // 4. Generate Blob
+            // 6. Generate Blob
             const content = await zip.generateAsync({ type: 'blob' });
 
-            // 5. Download
+            // 7. Download
             const url = URL.createObjectURL(content);
             const a = document.createElement('a');
             a.href = url;
@@ -286,7 +475,7 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
 
         } catch (err) {
             console.error(err);
-            setStatus('Error!');
+            setStatus(err instanceof Error ? `Error: ${err.message}` : 'Error!');
         }
     };
 
@@ -362,6 +551,26 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
                 if (res.ok) aminoScriptRaw = await res.text();
             }
 
+            // Bundle Supabase asset blobs as base64 data URLs. The WebView is
+            // locked to about:blank so we can't ship loose files alongside the
+            // HTML — everything has to live inside the HTML string itself.
+            const collected = await collectExportAssets(project, setStatus);
+            setStatus('Packaging React Native App...');
+
+            const dataUrlAssets: Record<string, { url: string; mimeType: string }> = {};
+            for (const a of collected.assets) {
+                const b64 = await blobToBase64(a.blob);
+                dataUrlAssets[a.id] = {
+                    url: `data:${a.mimeType};base64,${b64}`,
+                    mimeType: a.mimeType,
+                };
+            }
+
+            const hasAssets = collected.assets.length > 0;
+            const assetsRegistryScript = hasAssets
+                ? 'window.GEOMETRY_ASSETS=' + JSON.stringify({ assets: dataUrlAssets, folders: collected.folders }) + ';'
+                : '';
+
             // Escape both scripts for storage inside JS template literals:
             //   - backslashes  ->  double backslash
             //   - backticks    ->  escaped backtick
@@ -398,6 +607,25 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
                   + '// Contains 20 molecular structures. Load before player.\n'
                   + '// ═══════════════════════════════════════════════════════════\n'
                   + 'export const AMINO_BUNDLE = ' + backtick + escapedAmino + backtick + ';\n';
+            }
+
+            // Asset registry bundle — paths to every asset_set/asset_single
+            // asset, inlined as base64 data URLs. Empty string if the project
+            // doesn't reference any Supabase assets.
+            let assetsBundleTs = '';
+            if (hasAssets) {
+                const escapedAssets = escapeForTemplate(assetsRegistryScript);
+                const folderCount = Object.keys(collected.folders).length;
+                const assetCount = collected.assets.length;
+                assetsBundleTs =
+                    '// ═══════════════════════════════════════════════════════════\n'
+                  + '// AUTO-GENERATED — Asset Registry (base64 data URLs)\n'
+                  + '// Contains ' + assetCount + ' asset' + (assetCount === 1 ? '' : 's')
+                  + ' across ' + folderCount + ' folder' + (folderCount === 1 ? '' : 's') + '.\n'
+                  + '// Sets window.GEOMETRY_ASSETS so the player can resolve\n'
+                  + '// asset_set / asset_single layers offline.\n'
+                  + '// ═══════════════════════════════════════════════════════════\n'
+                  + 'export const ASSETS_BUNDLE = ' + backtick + escapedAssets + backtick + ';\n';
             }
 
             // PixiJS bundle — rendering engine library (can be swapped/upgraded independently)
@@ -465,6 +693,7 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
                 'import { PLAYER_BUNDLE } from "./player-bundle";',
                 includeAstro ? 'import { ASTRO_BUNDLE } from "./astro-data-bundle";' : '// Astro data not included',
                 includeAmino ? 'import { AMINO_BUNDLE } from "./amino-data-bundle";' : '// Amino data not included',
+                hasAssets    ? 'import { ASSETS_BUNDLE } from "./assets-bundle";' : '// No Supabase assets used',
                 '',
                 '// ── Types ──────────────────────────────────────────────────────',
                 'interface GeometryPlayerProps {',
@@ -572,6 +801,7 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
                 '  const safePlayer = PLAYER_BUNDLE.replace(/<\\/script>/gi, "<\\\\/script>");',
                 includeAstro ? '  const safeAstro = ASTRO_BUNDLE.replace(/<\\/script>/gi, "<\\\\/script>");' : '',
                 includeAmino ? '  const safeAmino = AMINO_BUNDLE.replace(/<\\/script>/gi, "<\\\\/script>");' : '',
+                hasAssets    ? '  const safeAssets = ASSETS_BUNDLE.replace(/<\\/script>/gi, "<\\\\/script>");' : '',
                 '',
                 '  // ── Build self-contained HTML ─────────────────────────────────',
                 '  // The HTML includes a postMessage bridge that sends structured',
@@ -595,6 +825,8 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
                 includeAstro ? '    "<script>" + safeAstro + "<\\/script>",' : '',
                 includeAmino ? '    "<!-- Amino Acid Molecule SVG Data -->",' : '',
                 includeAmino ? '    "<script>" + safeAmino + "<\\/script>",' : '',
+                hasAssets    ? '    "<!-- Asset Registry (asset_set / asset_single) -->",' : '',
+                hasAssets    ? '    "<script>" + safeAssets + "<\\/script>",' : '',
 '    "<!-- Geometry Sequencer Player -->",',
 '    "<script>" + safePlayer + "<\\/script>",',
                 '    "<script>",',
@@ -859,6 +1091,7 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
             zip.file('src/engine/pixi-bundle.ts', pixiBundleTs);
             if (includeAstro && astroBundleTs) zip.file('src/engine/astro-data-bundle.ts', astroBundleTs);
             if (includeAmino && aminoBundleTs) zip.file('src/engine/amino-data-bundle.ts', aminoBundleTs);
+            if (hasAssets && assetsBundleTs) zip.file('src/engine/assets-bundle.ts', assetsBundleTs);
             zip.file('src/engine/player-bundle.ts', playerBundleTs);
             zip.file('src/engine/GeometryPlayer.tsx', geometryPlayerTsx);
 
@@ -898,7 +1131,7 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
 
         } catch (err) {
             console.error(err);
-            setStatus('Error!');
+            setStatus(err instanceof Error ? `Error: ${err.message}` : 'Error!');
         }
     };
 
@@ -1150,6 +1383,14 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
                                             <span className="text-xs text-white/50">Custom SVGs included in animation data</span>
                                         </div>
                                     )}
+                                    {assetLayerCount > 0 && (
+                                        <div className="flex items-center gap-2 p-2.5 bg-black/20 border border-white/5 rounded-lg">
+                                            <span className="text-[9px] text-green-500">✓</span>
+                                            <span className="text-xs text-white/50">
+                                                Bundling assets for {assetLayerCount} layer{assetLayerCount === 1 ? '' : 's'} (auto)
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <button
@@ -1219,6 +1460,14 @@ ${includeAmino ? '    <!-- Amino Acid SVG Data (optional) -->\n    <script src="
                                         <div className="flex items-center gap-2 p-2.5 bg-black/20 border border-white/5 rounded-lg">
                                             <span className="text-[9px] text-green-500">✓</span>
                                             <span className="text-xs text-white/50">Custom SVGs included in animation data</span>
+                                        </div>
+                                    )}
+                                    {assetLayerCount > 0 && (
+                                        <div className="flex items-center gap-2 p-2.5 bg-black/20 border border-white/5 rounded-lg">
+                                            <span className="text-[9px] text-green-500">✓</span>
+                                            <span className="text-xs text-white/50">
+                                                Bundling assets for {assetLayerCount} layer{assetLayerCount === 1 ? '' : 's'} (auto)
+                                            </span>
                                         </div>
                                     )}
                                 </div>

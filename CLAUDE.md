@@ -44,3 +44,15 @@ npm run dev     # Vite on port 3008
 ```
 
 Build commands in `App/package.json` include multiple `build:*` scripts for separate bundles (player, pixi, astro, amino) — inherited from v1.
+
+### Pre-commit bundle rebuild
+
+`App/public/{player,pixi-bundle,astro-data,amino-data}.js` are committed build artifacts that the HTML / React Native exporters fetch at export time. The editor itself never reads them — it bundles `src/` via the main vite config — so they go stale silently when you change renderer / player / entry sources. The stale bundle only blows up later, in the user's exported HTML.
+
+A pre-commit hook at [.githooks/pre-commit](.githooks/pre-commit) detects staged source changes in `src/player.ts`, `src/rendering/**`, `src/utils/**`, `src/constants/**`, `src/types/**`, `src/{pixi,astro,amino}-entry.ts`, or `src/data/{astro,amino,molecules}.ts`, then rebuilds the matching bundles and re-stages them into the commit. To enable it on a fresh clone:
+
+```
+git config core.hooksPath .githooks
+```
+
+Bypass with `git commit --no-verify` if you have a real reason; don't make a habit of it.
