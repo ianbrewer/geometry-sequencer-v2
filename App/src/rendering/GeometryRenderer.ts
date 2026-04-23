@@ -7,6 +7,7 @@ import { TwistFilter } from 'pixi-filters/twist';
 import { BulgePinchFilter } from 'pixi-filters/bulge-pinch';
 import { MotionBlurFilter } from 'pixi-filters/motion-blur';
 import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
+import { ColorOverlayFilter } from 'pixi-filters/color-overlay';
 import { interpolateGeneric } from '../utils/interpolation';
 import { updatePrimitive } from '../rendering/PrimitiveRenderer';
 import { createGradientTexture } from '../utils/gradients';
@@ -474,8 +475,9 @@ export class GeometryRenderer {
                         };
                         const colorKey = buildColorKey(recolorOpts);
                         // For SVGs, the recolored variant is rasterized from rewritten source.
-                        // For rasters, the base texture is always used — any fillColor
-                        // override is applied as a sprite tint below.
+                        // For rasters, ColorOverlayFilter replaces RGB with fillColor while
+                        // preserving the source alpha — gives a true silhouette recolor
+                        // regardless of the PNG's original color (tint would only multiply).
                         const useVariant = colorKey && assetCache.isSvg(id);
                         const texture = useVariant
                             ? assetCache.getTextureSync(id, colorKey, recolorOpts)
@@ -484,7 +486,8 @@ export class GeometryRenderer {
                         const sprite = new Sprite(texture);
                         sprite.anchor.set(0.5);
                         if (!useVariant && effectiveConfig.fillEnabled && effectiveConfig.fillColor) {
-                            sprite.tint = new Color(effectiveConfig.fillColor).toNumber();
+                            const colorNum = new Color(effectiveConfig.fillColor).toNumber();
+                            sprite.filters = [new ColorOverlayFilter({ color: colorNum, alpha: 1 })];
                         }
                         // Respect original aspect ratio — fit the sprite's bounding box inside
                         // the layer's radius while preserving the texture's width:height ratio.

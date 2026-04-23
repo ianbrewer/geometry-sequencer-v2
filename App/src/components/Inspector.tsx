@@ -352,24 +352,20 @@ const Inspector: React.FC = () => {
         updateLayer(activeLayer.id, { config: { ...activeLayer.config, [key]: val } }, skipHistory);
     };
 
-    // Attach a folder to an asset_set layer and apply radial-vs-linear defaults
-    // based on folder size. Small folders (<=20 assets) default to a 360° orbit with
-    // alignToPath; larger folders default to a flat row (linear spacing).
+    // Attach a folder to an asset_set layer. Defaults: 360° radial orbit at
+    // spread 300 with alignToPath on, no linear spacing.
     const applyAssetSetFolder = async (folderId: string) => {
         if (!activeLayer) return;
-        let assets = assetsByFolder[folderId];
-        if (!assets) {
-            assets = await fetchAssets(folderId);
+        if (!assetsByFolder[folderId]) {
+            await fetchAssets(folderId);
         }
-        const count = Math.max(1, assets?.length ?? 0);
-        const radial = count <= 20;
 
         const updatedKeyframes = activeLayer.keyframes.map(kf => ({
             ...kf,
             value: {
                 ...kf.value,
-                orbitRadius: radial ? 200 : 0,
-                spacingX: radial ? 0 : 60,
+                orbitRadius: 300,
+                spacingX: 0,
                 spacingY: 0,
             }
         }));
@@ -377,7 +373,7 @@ const Inspector: React.FC = () => {
             config: {
                 ...activeLayer.config,
                 assetFolderId: folderId,
-                alignToPath: radial,
+                alignToPath: true,
                 radialArc: 360,
             },
             keyframes: updatedKeyframes
