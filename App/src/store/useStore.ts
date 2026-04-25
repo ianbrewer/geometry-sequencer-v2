@@ -842,17 +842,19 @@ export const useStore = create<AppState>((set, get) => {
 
             const relativeTime = absoluteTime - updatedTimeline.start;
 
-            // Find frames time-wise
+            // Find frames time-wise. If the layer has no keyframes (user deleted them all),
+            // seed from DEFAULT_ANIMATABLES so the layer can recover.
             const sorted = [...layer.keyframes].sort((a, b) => a.time - b.time);
-            let prevKf = sorted[0];
+            let prevKf: LayerKeyframe | undefined = sorted[0];
             for (const kf of sorted) {
                 if (kf.time <= relativeTime) prevKf = kf;
             }
+            const baseValue = prevKf ? prevKf.value : DEFAULT_ANIMATABLES;
 
             const newKf: LayerKeyframe = {
                 id: `kf-${Math.random().toString(36).substr(2, 9)}`,
                 time: relativeTime,
-                value: JSON.parse(JSON.stringify(prevKf.value)), // Clone values
+                value: JSON.parse(JSON.stringify(baseValue)), // Clone values
                 easing: 'easeInOutSine'
             };
 
