@@ -468,14 +468,17 @@ const AssetTile = ({ asset, onDelete }: { asset: Asset; onDelete: () => void }) 
             {...listeners}
             className="group relative aspect-square rounded border border-white/5 bg-[#252525] overflow-hidden hover:border-[#D4AF37]/50 transition-colors cursor-grab active:cursor-grabbing touch-none"
         >
-            {/* Checkerboard so both black- and white-line SVGs read clearly. */}
+            {/* SVGs sit on a flat 50% gray so both black- and white-stroke art read clearly.
+                Rasters keep a checkerboard so transparency is visible. */}
             <div
                 className="absolute inset-0 p-2 pointer-events-none"
-                style={{
-                    backgroundColor: '#8a8a8a',
-                    backgroundImage: 'conic-gradient(#6f6f6f 25%, transparent 0 50%, #6f6f6f 0 75%, transparent 0)',
-                    backgroundSize: '12px 12px',
-                }}
+                style={asset.mimeType === 'image/svg+xml'
+                    ? { backgroundColor: '#808080' }
+                    : {
+                        backgroundColor: '#8a8a8a',
+                        backgroundImage: 'conic-gradient(#6f6f6f 25%, transparent 0 50%, #6f6f6f 0 75%, transparent 0)',
+                        backgroundSize: '12px 12px',
+                    }}
             >
                 <Thumbnail asset={asset} />
             </div>
