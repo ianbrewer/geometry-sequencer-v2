@@ -9,7 +9,7 @@ task_id	name	status	priority	issue_type	app_section	owner	parent	notes	created_a
 1213387118254105	Export is not visible on white background	Backlog	Low	UX/UI	Timeline	Unassigned			2026-02-22 17:34:06	
 1213070073876378	Fix react export	Backlog	Low	Technical Debt	Exporters	Unassigned			2026-02-01 16:22:31	
 1213142138288915	Set default project state When starting a new project either don't add a layer or default to first frame of layer one pre-selected	Backlog	Low		General	Unassigned			2026-02-05 16:29:36	
-1213589928739650	there is a small bug, when I switch shape from SVG to polygon, it doesn't switch to polygon, it stays as SVG	Backlog	Low	Bug	Animation Variables	Alexa			2026-03-10 11:13:15	
+1213589928739650	there is a small bug, when I switch shape from SVG to polygon, it doesn't switch to polygon, it stays as SVG	Need Testing	Low	Bug	Animation Variables	Alexa		Fixed: type-switcher dropdown wasn't clearing customPath/customPaths from the layer config, so the polygon renderer's custom-shape branch kept drawing the SVG. Now clears them on switch.	2026-03-10 11:13:15
 1213783121489132	video exporter doesn't cancel and percetnage timer is incorrect	Backlog	Low	Bug	Exporters	Alexa			2026-03-24 22:31:27	
 1213070073876386	video thumbnails	Backlog	Low	Enhancement	Front Page	Unassigned		Create a thumbnail view of the file browser\n\nUse this thumbnail view later as home page placholders\n\nbnails?\n\nlittle mmoves of animations! yes\n\nupdated file	2026-02-01 22:41:37	
 local-1776956514275-453925	Make background on thumbnails of uploaded svg files 50% gray	Do Next				Unassigned			2026-04-23 15:01:54	
