@@ -1,5 +1,5 @@
 task_id	name	status	priority	issue_type	app_section	owner	parent	notes	created_at	completed_at
-1213409303569223	color background outside canvas a cool dark gray to distinguish it from canvas area	Backlog	High	Enhancement		Unassigned			2026-02-23 18:42:10	
+1213409303569223	color background outside canvas a cool dark gray to distinguish it from canvas area	Need Testing	High	Enhancement	Canvas	Unassigned			2026-02-23 18:42:10
 1213409298716103	Group overide for style is not working in export	Backlog	High	Bug		Unassigned			2026-02-23 16:23:32	
 1213783121489123	remove filters an d minify PIXXiJS	Backlog	High			Gustavo & Team			2026-03-24 22:29:06	
 1213422319914133	when deletein the first keyframe with double click, Ican't get it back	Backlog	High	Bug		Unassigned			2026-02-24 11:14:51	
