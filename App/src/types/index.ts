@@ -319,6 +319,7 @@ export interface AppState {
     selectedLayerIds: string[]; // New
     activeKeyframeId: string | null; // Changed from activeKeyState
     activeInspectorTab: InspectorTabType;
+    isFreshProject: boolean;
     clipboardLayers: Layer[];
     clipboardKeyframe: Keyframe<any> | null; // Changed from clipboardKeyState which was complex
     exportSettings: ExportSettings;
@@ -351,6 +352,7 @@ export interface AppState {
     setSelectedLayerIds: (ids: string[]) => void; // New
     setActiveKeyframeId: (id: string | null, layerId?: string) => void; // Changed
     setActiveInspectorTab: (tab: InspectorTabType) => void;
+    clearFreshProject: () => void;
     addLayer: () => void;
     updateLayer: (id: string, updates: Partial<Layer>, skipHistory?: boolean) => void;
     toggleLayerVisibility: (id: string) => void;
