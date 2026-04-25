@@ -218,6 +218,7 @@ export const useStore = create<AppState>((set, get) => {
         selectedLayerIds: [],
         activeKeyframeId: INITIAL_PROJECT.layers[0].keyframes[0].id,
         activeInspectorTab: 'controls',
+        isFreshProject: false,
         clipboardLayers: (() => {
             try {
                 const stored = localStorage.getItem('clipboardLayers');
@@ -301,11 +302,13 @@ export const useStore = create<AppState>((set, get) => {
 
         setCurrentTime: (time: number) => set({ currentTime: time }),
 
-        setProject: (project: Project) => set({ project, activeLayerId: project.layers[0]?.id }),
+        setProject: (project: Project) => set({ project, activeLayerId: project.layers[0]?.id, isFreshProject: false }),
 
         setIsLooping: (isLooping: boolean) => set({ isLooping }),
 
         setActiveInspectorTab: (tab) => set({ activeInspectorTab: tab }),
+
+        clearFreshProject: () => set((state) => state.isFreshProject ? { isFreshProject: false } : state),
 
         renameProject: async (id: string, name: string) => {
             const { project, fetchProjects, saveProject } = get();
@@ -1149,7 +1152,8 @@ export const useStore = create<AppState>((set, get) => {
                         activeKeyframeId: projectData.layers[0]?.keyframes[0]?.id || null,
                         currentTime: 0,
                         isPlaying: view === 'player',
-                        isLooping: view === 'dashboard' ? true : get().isLooping
+                        isLooping: view === 'dashboard' ? true : get().isLooping,
+                        isFreshProject: false,
                     });
 
                     // Preload asset folders referenced by asset_set layers so the renderer
@@ -1179,9 +1183,11 @@ export const useStore = create<AppState>((set, get) => {
             set({
                 project: newProject,
                 currentView: 'editor',
+                activeLayerId: newProject.layers[0]?.id || null,
                 activeKeyframeId: newProject.layers[0]?.keyframes[0]?.id || null, // Select first keyframe
                 currentTime: 0,
-                isPlaying: false
+                isPlaying: false,
+                isFreshProject: true,
             });
         },
 
