@@ -688,7 +688,11 @@ const Inspector: React.FC = () => {
                                                     keyframes: updatedKeyframes
                                                 });
                                             } else {
-                                                updateLayer(activeLayer.id, { type: newType });
+                                                // Clear any uploaded SVG paths so picking "polygon" (or any
+                                                // non-custom type) doesn't keep rendering the SVG via the
+                                                // polygon renderer's customPath branch.
+                                                const { customPath, customPaths, ...restConfig } = activeLayer.config;
+                                                updateLayer(activeLayer.id, { type: newType, config: restConfig });
                                             }
                                         }}
                                         className="w-full h-9 appearance-none bg-[#1A1A1A] border border-white/10 hover:border-white/30 rounded px-2 pl-3 text-[10px] uppercase font-bold text-[#D4AF37] focus:outline-none"
