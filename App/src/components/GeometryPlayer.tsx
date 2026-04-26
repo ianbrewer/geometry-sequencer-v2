@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Application, Color } from 'pixi.js';
 import { GeometryRenderer } from '../rendering/GeometryRenderer';
+import { setPixiAppProvider } from '../utils/thumbnailGenerator';
 import type { Project } from '../types';
 
 interface GeometryPlayerProps {
@@ -71,6 +72,7 @@ const GeometryPlayer: React.FC<GeometryPlayerProps> = ({
             }
             appRef.current = app;
             rendererRef.current = new GeometryRenderer();
+            setPixiAppProvider(() => appRef.current);
 
             app.ticker.add((ticker) => {
                 if (!app.renderer || !rendererRef.current) return;
@@ -96,6 +98,7 @@ const GeometryPlayer: React.FC<GeometryPlayerProps> = ({
 
         return () => {
             aborted = true;
+            setPixiAppProvider(null);
             if (appRef.current) {
                 appRef.current.ticker.stop();
                 appRef.current.destroy(true, { children: true, texture: true });

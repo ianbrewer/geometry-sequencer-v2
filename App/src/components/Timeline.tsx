@@ -59,7 +59,8 @@ const Timeline: React.FC = () => {
         deleteKeyframe,
         addFolder,
         toggleLayerCollapse,
-        copySelection
+        copySelection,
+        isFreshProject,
     } = useStore((state) => state);
 
     const timelineRef = useRef<HTMLDivElement>(null);
@@ -755,11 +756,13 @@ const Timeline: React.FC = () => {
                                     {/* Keyframes */}
                                     {layer.keyframes.map(kf => {
                                         const isKfSelected = activeKeyframeId === kf.id;
+                                        const isOnboardingPulse = isFreshProject
+                                            && layer.id === project.layers[0]?.id
+                                            && kf.id === project.layers[0]?.keyframes[0]?.id;
                                         return (
                                             <div
                                                 key={kf.id}
-                                                className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rotate-45 border cursor-pointer transition-colors z-20 ${isKfSelected ? 'bg-[#D4AF37] border-[#D4AF37] scale-125' : 'bg-[#1e1e1e] border-white/40 hover:border-white'
-                                                    }`}
+                                                className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rotate-45 border cursor-pointer transition-colors z-20 ${isKfSelected ? 'bg-[#D4AF37] border-[#D4AF37] scale-125' : 'bg-[#1e1e1e] border-white/40 hover:border-white'} ${isOnboardingPulse ? 'fresh-keyframe-pulse' : ''}`}
                                                 style={{
                                                     left: `${((layer.timeline.start + kf.time) / project.duration) * 100}%`
                                                 }}

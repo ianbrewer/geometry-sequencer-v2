@@ -2,7 +2,7 @@
 
 Working plan for the rebuild described in [draft notes for app.md](./draft%20notes%20for%20app.md). The core shift: stop hardcoding icon sets (astrology, amino, I-Ching strokes) as shape types, and instead let users upload their own graphic sets that behave exactly like those hardcoded sets do today.
 
-Keep [CLAUDE.md](./CLAUDE.md) and [TODO.md](./TODO.md) open when executing any of the prompts below — schema-ownership rules and the existing `assets` / `asset_folders` / `v2-user-assets` backend matter here.
+Keep [CLAUDE.md](./CLAUDE.md) and [tasks.tsv](./tasks.tsv) open when executing any of the prompts below — schema-ownership rules and the existing `assets` / `asset_folders` / `v2-user-assets` backend matter here.
 
 ## 1. Current state (what exists today)
 
@@ -41,7 +41,7 @@ These are just starting values — the user can change anything after.
 
 Sequenced so each stage is shippable on its own.
 
-**Prereqs** — knock these out first, they're already on [TODO.md](./TODO.md):
+**Prereqs** — knock these out first, they're already in [tasks.tsv](./tasks.tsv):
 
 - SVG sanitization on upload (DOMPurify) — **blocks** any asset upload UI.
 - Asset output optimizer (SVGO / pngquant / mozjpeg) — not strictly blocking, but you want it before users upload real folders.
@@ -137,7 +137,7 @@ Required actions:
 - renameAssetFolder(id, name)
 - deleteAssetFolder(id, deleteAssets?)
 - fetchAssets(folderId): load assets for a folder
-- uploadAsset(folderId, file): sanitize SVGs with DOMPurify before upload (see TODO.md — this is
+- uploadAsset(folderId, file): sanitize SVGs with DOMPurify before upload (see tasks.tsv — this is
   the gating item), upload blob to `{user_id}/{asset_id}.{ext}` in v2-user-assets, insert assets
   row
 - deleteAsset(id): remove storage object + row
@@ -228,9 +228,9 @@ For project migration: in loadProject (useStore.ts), walk project.layers, rewrit
 with type `astrology` | `amino` | `iching_lines` to type `asset_set` with `assetFolderId`
 pointing at the seed folder. Persist on next save. Leave the legacy switch arms in
 GeometryRenderer / PrimitiveRenderer intact as a safety net until a separate audit confirms
-all rows are migrated (tracked in TODO.md — add that item as part of this prompt).
+all rows are migrated (tracked in tasks.tsv — add that row as part of this prompt).
 
-When done, append a TODO item for the eventual removal of the legacy astrology/amino/
+When done, append a tasks.tsv row for the eventual removal of the legacy astrology/amino/
 iching_lines code paths.
 ```
 

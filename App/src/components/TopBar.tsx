@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Save, Menu, ChevronDown, Copy, Trash2, Edit2, Settings, User as UserIcon, LogOut, Share2 } from 'lucide-react';
+import { Save, Menu, ChevronDown, Copy, Trash2, Edit2, Settings, User as UserIcon, LogOut, Share2, Link2, Camera } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import AuthModal from './AuthModal';
 import ExportModal from './ExportModal';
+import { captureThumbnail } from '../utils/thumbnailGenerator';
 const TopBar: React.FC = () => {
     const project = useStore(s => s.project);
     const duplicateProject = useStore(s => s.duplicateProject);
@@ -20,6 +21,8 @@ const TopBar: React.FC = () => {
     const [isRenaming, setIsRenaming] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
     const [tempName, setTempName] = useState(project.name);
+    const [linkCopied, setLinkCopied] = useState(false);
+    const [thumbState, setThumbState] = useState<'idle' | 'saving' | 'saved'>('idle');
     const menuRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -43,6 +46,37 @@ const TopBar: React.FC = () => {
         setTempName(project.name);
         setIsRenaming(true);
         setIsMenuOpen(false);
+    };
+
+    const handleSetThumbnail = async () => {
+        if (thumbState !== 'idle') return;
+        setThumbState('saving');
+        try {
+            const blob = await captureThumbnail(320, 180, project.backgroundColor || '#000000');
+            if (!blob) {
+                setThumbState('idle');
+                return;
+            }
+            await useStore.getState().uploadProjectThumbnail(project.id, blob);
+            setThumbState('saved');
+            setTimeout(() => setThumbState('idle'), 1500);
+        } catch (e) {
+            console.warn('Set thumbnail failed', e);
+            setThumbState('idle');
+        }
+    };
+
+    const handleCopyLink = async () => {
+        const url = new URL(window.location.href);
+        url.searchParams.set('p', project.id);
+        const shareUrl = url.origin + url.pathname + url.search;
+        try {
+            await navigator.clipboard.writeText(shareUrl);
+            setLinkCopied(true);
+            setTimeout(() => setLinkCopied(false), 1500);
+        } catch {
+            window.prompt('Copy this link:', shareUrl);
+        }
     };
 
 
@@ -104,6 +138,13 @@ const TopBar: React.FC = () => {
                             >
                                 <Copy size={12} className="text-[#D4AF37]" />
                                 Duplicate Project
+                            </button>
+                            <button
+                                onClick={handleCopyLink}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-[10px] uppercase tracking-widest text-white/70 hover:text-white hover:bg-white/5 transition-colors"
+                            >
+                                <Link2 size={12} className="text-[#D4AF37]" />
+                                {linkCopied ? 'Link Copied' : 'Copy Link'}
                             </button>
                             <div className="h-px bg-white/5 my-1" />
                             <button
@@ -171,6 +212,22 @@ const TopBar: React.FC = () => {
                 </button>
 
                 <div className="h-6 w-px bg-white/10 mx-2" />
+
+                <button
+                    onClick={handleSetThumbnail}
+                    disabled={thumbState !== 'idle'}
+                    title="Capture the current canvas (at the timeline marker's current position) as this project's thumbnail."
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded border transition-colors active:scale-95 disabled:cursor-default ${
+                        thumbState === 'saved'
+                            ? 'border-[#D4AF37]/60 bg-[#D4AF37]/10 text-[#D4AF37]'
+                            : 'border-white/20 hover:bg-white/5 text-white/60 hover:text-white'
+                    }`}
+                >
+                    <Camera size={14} className="text-[#D4AF37]" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest">
+                        {thumbState === 'saving' ? 'Saving…' : thumbState === 'saved' ? 'Saved' : 'Set Thumbnail'}
+                    </span>
+                </button>
 
                 <button
                     onClick={() => setShowExportModal(true)}

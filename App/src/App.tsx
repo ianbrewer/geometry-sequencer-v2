@@ -106,6 +106,11 @@ const App: React.FC = () => {
       useStore.getState().setUser(session);
 
       if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        const urlProjectId = new URLSearchParams(window.location.search).get('p');
+        if (session && urlProjectId) {
+          useStore.getState().loadProject(urlProjectId, 'editor');
+          return;
+        }
         if (useStore.getState().currentView === 'landing' && session) {
           useStore.getState().setView('dashboard');
         }
@@ -116,6 +121,29 @@ const App: React.FC = () => {
     });
 
     return () => subscription.unsubscribe();
+  }, []);
+
+  // Mirror current project + view back to the URL so refresh / share-via-URL-bar work.
+  React.useEffect(() => {
+    const sync = (projectId: string | undefined, view: string) => {
+      const url = new URL(window.location.href);
+      const isEditing = view === 'editor' && projectId;
+      if (isEditing) {
+        url.searchParams.set('p', projectId);
+      } else {
+        url.searchParams.delete('p');
+      }
+      const next = url.pathname + (url.search || '') + url.hash;
+      if (next !== window.location.pathname + window.location.search + window.location.hash) {
+        window.history.replaceState(null, '', next);
+      }
+    };
+    sync(useStore.getState().project?.id, useStore.getState().currentView);
+    return useStore.subscribe((state, prev) => {
+      if (state.project?.id !== prev.project?.id || state.currentView !== prev.currentView) {
+        sync(state.project?.id, state.currentView);
+      }
+    });
   }, []);
 
   if (currentView === 'dashboard') return <Dashboard />;

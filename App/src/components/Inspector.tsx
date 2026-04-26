@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { ChevronUp, Star, RotateCw, Maximize, Layers, Trash2, Anchor, Pentagon, Asterisk, Plus, Timer, Grid, Move, TrendingUp, Shuffle, Hash, Palette, Lock, Unlock, FolderOpen, Image as ImageIcon } from 'lucide-react';
+import { ChevronUp, Star, RotateCw, Maximize, Layers, Trash2, Anchor, Pentagon, Asterisk, Plus, Timer, Grid, Move, TrendingUp, Shuffle, Hash, Palette, Lock, Unlock, FolderOpen, Image as ImageIcon, X } from 'lucide-react';
 import GradientEditor from './GradientEditor';
 import { MOLECULES } from '../data/molecules';
 import type { ShapeType, AnimatableProperties, AssetFolder, Asset } from '../types';
@@ -278,8 +278,27 @@ const Inspector: React.FC = () => {
         project, activeLayerId, activeKeyframeId,
         updateLayer, updateProject, updateKeyframe, addKeyframe,
         deleteKeyframe, setGlobalLineColor,
-        assetFolders, assetsByFolder, fetchAssets
+        assetFolders, assetsByFolder, fetchAssets,
+        isFreshProject, clearFreshProject,
     } = useStore(s => s);
+
+    // Track the project reference at the moment isFreshProject became true.
+    // First time the user mutates the project (any edit), the reference changes
+    // from the snapshot — clear the fresh flag so the banner + keyframe pulse stop.
+    const freshSnapshotRef = useRef<typeof project | null>(null);
+    useEffect(() => {
+        if (!isFreshProject) {
+            freshSnapshotRef.current = null;
+            return;
+        }
+        if (freshSnapshotRef.current === null) {
+            freshSnapshotRef.current = project;
+            return;
+        }
+        if (project !== freshSnapshotRef.current) {
+            clearFreshProject();
+        }
+    }, [project, isFreshProject, clearFreshProject]);
 
     const activeLayer = project.layers.find((l) => l.id === activeLayerId);
 
@@ -598,6 +617,23 @@ const Inspector: React.FC = () => {
                 </div>
             </div>
 
+            {/* Onboarding banner for brand-new projects. Auto-dismisses on first edit. */}
+            {isFreshProject && activeKeyframe && (
+                <div className="px-4 py-3 bg-[#D4AF37]/10 border-b border-[#D4AF37]/20 flex items-start gap-3 text-[10px] leading-relaxed text-white/80">
+                    <div className="flex-1">
+                        <div className="font-bold text-[#D4AF37] uppercase tracking-wider mb-1">You're editing Keyframe 1 @ {activeKeyframe.time.toFixed(2)}s</div>
+                        <div className="text-white/60">Adjust values below to set this moment. Click the timeline to add more keyframes and start animating.</div>
+                    </div>
+                    <button
+                        onClick={clearFreshProject}
+                        className="p-1 -m-1 text-white/40 hover:text-white/80 transition-colors"
+                        title="Dismiss"
+                    >
+                        <X size={12} />
+                    </button>
+                </div>
+            )}
+
             {/* Content Display Logic */}
             <div className={`flex-1 overflow-y-auto scrollbar-none pb-12 ${!activeKeyframe ? 'opacity-80' : ''}`}>
 
@@ -652,7 +688,11 @@ const Inspector: React.FC = () => {
                                                     keyframes: updatedKeyframes
                                                 });
                                             } else {
-                                                updateLayer(activeLayer.id, { type: newType });
+                                                // Clear any uploaded SVG paths so picking "polygon" (or any
+                                                // non-custom type) doesn't keep rendering the SVG via the
+                                                // polygon renderer's customPath branch.
+                                                const { customPath, customPaths, ...restConfig } = activeLayer.config;
+                                                updateLayer(activeLayer.id, { type: newType, config: restConfig });
                                             }
                                         }}
                                         className="w-full h-9 appearance-none bg-[#1A1A1A] border border-white/10 hover:border-white/30 rounded px-2 pl-3 text-[10px] uppercase font-bold text-[#D4AF37] focus:outline-none"

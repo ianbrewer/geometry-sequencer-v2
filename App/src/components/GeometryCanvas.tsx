@@ -54,7 +54,7 @@ const GeometryCanvas: React.FC = () => {
     };
 
     return (
-        <div ref={containerRef} className="w-full h-full bg-black overflow-hidden relative">
+        <div ref={containerRef} className="w-full h-full bg-[#1a1d24] overflow-hidden relative">
             <GeometryPlayer
                 project={project}
                 width={dimensions.width}

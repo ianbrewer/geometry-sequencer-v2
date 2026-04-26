@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import type { GradientStop } from '../types';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Plus, X } from 'lucide-react';
 import { CustomColorPicker } from './CustomColorPicker';
+import { useStore } from '../store/useStore';
 
 interface GradientEditorProps {
     stops: GradientStop[];
@@ -12,6 +13,9 @@ const GradientEditor: React.FC<GradientEditorProps> = ({ stops, onChange }) => {
     const trackRef = useRef<HTMLDivElement>(null);
     const [activeStopId, setActiveStopId] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
+    const savedGradients = useStore((s) => s.savedGradients);
+    const addSavedGradient = useStore((s) => s.addSavedGradient);
+    const deleteSavedGradient = useStore((s) => s.deleteSavedGradient);
 
     // Sort stops just for rendering the background, but keep original order or sorted order in state?
     // It's better to keep them sorted by offset for logic, but usually we just sort when generating the string.
@@ -85,11 +89,64 @@ const GradientEditor: React.FC<GradientEditorProps> = ({ stops, onChange }) => {
         if (activeStopId === id) setActiveStopId(null);
     };
 
+    const applySavedGradient = (savedStops: GradientStop[]) => {
+        // Re-id when applying so each stop has a fresh id in the active editor.
+        onChange(
+            savedStops.map((s) => ({
+                id: Math.random().toString(36).substr(2, 9),
+                offset: s.offset,
+                color: s.color,
+            }))
+        );
+        setActiveStopId(null);
+    };
+
     return (
         <div className="p-4 bg-[#1a1a1a] rounded border border-white/10 w-[300px]">
             <div className="text-[10px] uppercase font-bold tracking-widest text-white/50 mb-3 flex justify-between">
                 <span>Gradient Editor</span>
                 <span className="text-[9px] opacity-50">Right-click handle to delete</span>
+            </div>
+
+            {/* Saved palette */}
+            <div className="mb-3 pb-3 border-b border-white/5">
+                <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[9px] uppercase font-bold text-white/40 tracking-widest">Saved Gradients</span>
+                    <button
+                        onClick={() => addSavedGradient(stops)}
+                        title="Save current gradient"
+                        className="p-1 rounded text-white/40 hover:text-white hover:bg-white/5"
+                    >
+                        <Plus size={11} />
+                    </button>
+                </div>
+                {savedGradients.length === 0 ? (
+                    <div className="text-[9px] text-white/20 italic">No saved gradients yet</div>
+                ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                        {savedGradients.map((g) => {
+                            const sorted = [...g.stops].sort((a, b) => a.offset - b.offset);
+                            const bg = `linear-gradient(90deg, ${sorted.map((s) => `${s.color} ${s.offset}%`).join(', ')})`;
+                            return (
+                                <div key={g.id} className="relative group">
+                                    <button
+                                        onClick={() => applySavedGradient(g.stops)}
+                                        className="w-12 h-5 rounded border border-white/10 hover:border-white/40 hover:scale-105 transition-all"
+                                        style={{ background: bg }}
+                                        title="Apply gradient"
+                                    />
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); deleteSavedGradient(g.id); }}
+                                        className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-black/80 text-white/80 opacity-0 group-hover:opacity-100 hover:bg-red-500 flex items-center justify-center transition-opacity"
+                                        title="Delete"
+                                    >
+                                        <X size={8} />
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
 
             {/* Gradient Track */}

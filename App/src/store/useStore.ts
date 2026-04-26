@@ -4,6 +4,40 @@ import type { AppState, Project, Layer, LayerKeyframe, ProjectMetadata, Folder, 
 import { DEFAULT_ANIMATABLES } from '../constants/defaults';
 import { sanitizeSvgFile } from '../utils/sanitizeSvg';
 import { optimizeAsset } from '../utils/assetOptimizer';
+import { captureThumbnail } from '../utils/thumbnailGenerator';
+import type { SavedColor, SavedGradient, GradientStop } from '../types';
+
+const PROJECT_THUMBNAIL_PREFIX = '_project-thumbnails';
+const PROJECT_THUMBNAIL_BUCKET = 'v2-user-assets';
+const PROJECT_THUMBNAIL_TTL = 60 * 60 * 24; // 24h signed URL
+
+const SAVED_COLORS_KEY = 'v2-saved-colors';
+const SAVED_GRADIENTS_KEY = 'v2-saved-gradients';
+
+function loadJsonArray<T>(key: string): T[] {
+    if (typeof window === 'undefined') return [];
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? (parsed as T[]) : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveJsonArray<T>(key: string, value: T[]): void {
+    if (typeof window === 'undefined') return;
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+        // Quota exceeded or storage disabled — silently drop.
+    }
+}
+
+function makeId(): string {
+    return Math.random().toString(36).slice(2, 11);
+}
 import {
     SEED_FOLDER_NAMES,
     LEGACY_TYPE_TO_SEED_FOLDER,
@@ -187,6 +221,9 @@ export const useStore = create<AppState>((set, get) => {
         folders: [],
         assetFolders: [],
         assetsByFolder: {},
+        projectThumbnails: {},
+        savedColors: loadJsonArray<SavedColor>(SAVED_COLORS_KEY),
+        savedGradients: loadJsonArray<SavedGradient>(SAVED_GRADIENTS_KEY),
         user: null,
         session: null,
         adminProfiles: [],
@@ -208,7 +245,7 @@ export const useStore = create<AppState>((set, get) => {
         },
         signOut: async () => {
             await supabase.auth.signOut();
-            set({ session: null, user: null, savedProjects: [], folders: [], assetFolders: [], assetsByFolder: {} });
+            set({ session: null, user: null, savedProjects: [], folders: [], assetFolders: [], assetsByFolder: {}, projectThumbnails: {} });
         },
         exportSettings: { width: 1080, height: 1080, isActive: false, pixelRatio: 1 },
         currentTime: 0,
@@ -218,6 +255,7 @@ export const useStore = create<AppState>((set, get) => {
         selectedLayerIds: [],
         activeKeyframeId: INITIAL_PROJECT.layers[0].keyframes[0].id,
         activeInspectorTab: 'controls',
+        isFreshProject: false,
         clipboardLayers: (() => {
             try {
                 const stored = localStorage.getItem('clipboardLayers');
@@ -301,11 +339,13 @@ export const useStore = create<AppState>((set, get) => {
 
         setCurrentTime: (time: number) => set({ currentTime: time }),
 
-        setProject: (project: Project) => set({ project, activeLayerId: project.layers[0]?.id }),
+        setProject: (project: Project) => set({ project, activeLayerId: project.layers[0]?.id, isFreshProject: false }),
 
         setIsLooping: (isLooping: boolean) => set({ isLooping }),
 
         setActiveInspectorTab: (tab) => set({ activeInspectorTab: tab }),
+
+        clearFreshProject: () => set((state) => state.isFreshProject ? { isFreshProject: false } : state),
 
         renameProject: async (id: string, name: string) => {
             const { project, fetchProjects, saveProject } = get();
@@ -839,17 +879,19 @@ export const useStore = create<AppState>((set, get) => {
 
             const relativeTime = absoluteTime - updatedTimeline.start;
 
-            // Find frames time-wise
+            // Find frames time-wise. If the layer has no keyframes (user deleted them all),
+            // seed from DEFAULT_ANIMATABLES so the layer can recover.
             const sorted = [...layer.keyframes].sort((a, b) => a.time - b.time);
-            let prevKf = sorted[0];
+            let prevKf: LayerKeyframe | undefined = sorted[0];
             for (const kf of sorted) {
                 if (kf.time <= relativeTime) prevKf = kf;
             }
+            const baseValue = prevKf ? prevKf.value : DEFAULT_ANIMATABLES;
 
             const newKf: LayerKeyframe = {
                 id: `kf-${Math.random().toString(36).substr(2, 9)}`,
                 time: relativeTime,
-                value: JSON.parse(JSON.stringify(prevKf.value)), // Clone values
+                value: JSON.parse(JSON.stringify(baseValue)), // Clone values
                 easing: 'easeInOutSine'
             };
 
@@ -1058,6 +1100,12 @@ export const useStore = create<AppState>((set, get) => {
 
                 set({ project: updatedProject });
                 await get().fetchProjects();
+
+                // Snapshot the live canvas to a thumbnail and upload (fire-and-forget;
+                // we don't want save UI to block on this).
+                captureThumbnail(320, 180, updatedProject.backgroundColor || '#000000').then((blob) => {
+                    if (blob) get().uploadProjectThumbnail(updatedProject.id, blob);
+                });
             } catch (e) {
                 console.error('Failed to save project', e);
             }
@@ -1149,7 +1197,8 @@ export const useStore = create<AppState>((set, get) => {
                         activeKeyframeId: projectData.layers[0]?.keyframes[0]?.id || null,
                         currentTime: 0,
                         isPlaying: view === 'player',
-                        isLooping: view === 'dashboard' ? true : get().isLooping
+                        isLooping: view === 'dashboard' ? true : get().isLooping,
+                        isFreshProject: false,
                     });
 
                     // Preload asset folders referenced by asset_set layers so the renderer
@@ -1179,9 +1228,11 @@ export const useStore = create<AppState>((set, get) => {
             set({
                 project: newProject,
                 currentView: 'editor',
+                activeLayerId: newProject.layers[0]?.id || null,
                 activeKeyframeId: newProject.layers[0]?.keyframes[0]?.id || null, // Select first keyframe
                 currentTime: 0,
-                isPlaying: false
+                isPlaying: false,
+                isFreshProject: true,
             });
         },
 
@@ -1487,6 +1538,7 @@ export const useStore = create<AppState>((set, get) => {
                 }));
 
                 set({ savedProjects: projects, folders });
+                get().fetchProjectThumbnails();
             } catch (e) {
                 console.error("Failed to fetch data", e);
             }
@@ -1961,6 +2013,127 @@ export const useStore = create<AppState>((set, get) => {
             }
         },
 
+        uploadProjectThumbnail: async (projectId, blob) => {
+            const { user } = get();
+            if (!user) return;
+            const path = `${user.id}/${PROJECT_THUMBNAIL_PREFIX}/${projectId}.png`;
+            const { error } = await supabase.storage
+                .from(PROJECT_THUMBNAIL_BUCKET)
+                .upload(path, blob, { contentType: 'image/png', upsert: true });
+            if (error) {
+                console.warn('Project thumbnail upload failed', error);
+                return;
+            }
+            const { data: signed } = await supabase.storage
+                .from(PROJECT_THUMBNAIL_BUCKET)
+                .createSignedUrl(path, PROJECT_THUMBNAIL_TTL);
+            if (signed?.signedUrl) {
+                set((state) => ({
+                    projectThumbnails: {
+                        ...state.projectThumbnails,
+                        // Cache-bust so the new image replaces the old in <img> tags.
+                        [projectId]: `${signed.signedUrl}#t=${Date.now()}`,
+                    },
+                }));
+            }
+        },
+
+        addSavedColor: (color: string) => {
+            const trimmed = color.trim().toLowerCase();
+            if (!trimmed) return;
+            // Skip exact duplicates so the palette doesn't pile up.
+            if (get().savedColors.some((c) => c.color.toLowerCase() === trimmed)) return;
+            const next = [{ id: makeId(), color: trimmed }, ...get().savedColors];
+            set({ savedColors: next });
+            saveJsonArray(SAVED_COLORS_KEY, next);
+        },
+        deleteSavedColor: (id: string) => {
+            const next = get().savedColors.filter((c) => c.id !== id);
+            set({ savedColors: next });
+            saveJsonArray(SAVED_COLORS_KEY, next);
+        },
+        addSavedGradient: (stops: GradientStop[]) => {
+            if (!stops || stops.length < 2) return;
+            // Strip stop ids when persisting so the saved entry compares cleanly
+            // against future "is this gradient already saved" checks if we add them.
+            const cleanStops = stops.map((s) => ({
+                id: makeId(),
+                offset: s.offset,
+                color: s.color,
+            }));
+            const next = [{ id: makeId(), stops: cleanStops }, ...get().savedGradients];
+            set({ savedGradients: next });
+            saveJsonArray(SAVED_GRADIENTS_KEY, next);
+        },
+        deleteSavedGradient: (id: string) => {
+            const next = get().savedGradients.filter((g) => g.id !== id);
+            set({ savedGradients: next });
+            saveJsonArray(SAVED_GRADIENTS_KEY, next);
+        },
+
+        regenerateAllProjectThumbnails: async (onProgress) => {
+            const { savedProjects, project: original } = get();
+            const originalId = original?.id;
+
+            for (let i = 0; i < savedProjects.length; i++) {
+                const meta = savedProjects[i];
+                onProgress?.(i, savedProjects.length);
+                try {
+                    await get().loadProject(meta.id, 'dashboard');
+                    // Give Pixi time to mount the new project + render a frame.
+                    await new Promise((r) => setTimeout(r, 800));
+                    const bg = get().project?.backgroundColor || '#000000';
+                    const blob = await captureThumbnail(320, 180, bg);
+                    if (blob) {
+                        await get().uploadProjectThumbnail(meta.id, blob);
+                    }
+                } catch (e) {
+                    console.warn(`Thumbnail regen failed for ${meta.id}`, e);
+                }
+            }
+
+            // Restore the project the user was on before we started.
+            if (originalId && originalId !== get().project?.id) {
+                try {
+                    await get().loadProject(originalId, 'dashboard');
+                } catch {
+                    // Best effort; if it fails the user can just click a project.
+                }
+            }
+            onProgress?.(savedProjects.length, savedProjects.length);
+        },
+
+        fetchProjectThumbnails: async () => {
+            const { user } = get();
+            if (!user) {
+                set({ projectThumbnails: {} });
+                return;
+            }
+            const prefix = `${user.id}/${PROJECT_THUMBNAIL_PREFIX}`;
+            const { data: list, error } = await supabase.storage
+                .from(PROJECT_THUMBNAIL_BUCKET)
+                .list(prefix, { limit: 1000 });
+            if (error || !list?.length) return;
+
+            const paths = list
+                .filter((item) => item.name.endsWith('.png'))
+                .map((item) => `${prefix}/${item.name}`);
+            if (!paths.length) return;
+
+            const { data: signed, error: sErr } = await supabase.storage
+                .from(PROJECT_THUMBNAIL_BUCKET)
+                .createSignedUrls(paths, PROJECT_THUMBNAIL_TTL);
+            if (sErr || !signed) return;
+
+            const map: Record<string, string> = {};
+            signed.forEach((s, i) => {
+                if (!s.signedUrl) return;
+                const projectId = paths[i].split('/').pop()!.replace(/\.png$/, '');
+                map[projectId] = s.signedUrl;
+            });
+            set({ projectThumbnails: map });
+        },
+
         signedUrlForAsset: async (id: string) => {
             const { user } = get();
             if (!user) return null;
@@ -2047,6 +2220,10 @@ export const useStore = create<AppState>((set, get) => {
             }
             try {
                 await supabase.from('projects').delete().eq('id', id).eq('user_id', user.id);
+                // Best-effort: remove the project's thumbnail. Stays a no-op if absent.
+                supabase.storage
+                    .from(PROJECT_THUMBNAIL_BUCKET)
+                    .remove([`${user.id}/${PROJECT_THUMBNAIL_PREFIX}/${id}.png`]);
                 await get().fetchProjects();
             } catch (e) {
                 console.error('Failed to delete project', e);

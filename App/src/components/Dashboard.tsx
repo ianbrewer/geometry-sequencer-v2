@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Plus, Folder as FolderIcon, Clock, Copy, Edit2, Trash2, ArrowRight, Play, ChevronRight, ChevronDown, FolderPlus, Share2, LogOut, User as UserIcon, GripVertical } from 'lucide-react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { Plus, Folder as FolderIcon, Clock, Copy, Edit2, Trash2, ArrowRight, Play, ChevronRight, ChevronDown, FolderPlus, Share2, LogOut, User as UserIcon, GripVertical, LayoutGrid, List, RefreshCw } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { formatDistanceToNow } from 'date-fns';
 import GeometryCanvas from './GeometryCanvas';
@@ -65,6 +65,7 @@ const ProjectItem = ({ project, isOverlay = false, isInFolder = false, dropIndic
     const duplicateProject = useStore(s => s.duplicateProject);
     const deleteProject = useStore(s => s.deleteProject);
     const renameProject = useStore(s => s.renameProject);
+    const thumbnailUrl = useStore(s => s.projectThumbnails[project.id]);
 
     const [isRenaming, setIsRenaming] = useState(false);
     const [newName, setNewName] = useState(project.name);
@@ -130,8 +131,16 @@ const ProjectItem = ({ project, isOverlay = false, isInFolder = false, dropIndic
                                 }}
                             />
                         ) : (
-                            <div className="flex items-center gap-2">
-                                <ArrowRight size={10} className={`${isSelected ? 'text-[#D4AF37]' : 'text-white/20'}`} />
+                            <div className="flex items-center gap-2 min-w-0">
+                                <ArrowRight size={10} className={`${isSelected ? 'text-[#D4AF37]' : 'text-white/20'} shrink-0`} />
+                                {thumbnailUrl ? (
+                                    <img
+                                        src={thumbnailUrl}
+                                        alt=""
+                                        className="w-8 h-5 object-cover rounded-sm bg-black border border-white/5 shrink-0"
+                                        loading="lazy"
+                                    />
+                                ) : null}
                                 <h3 className={`font-bold text-xs truncate ${isSelected ? 'text-white' : 'text-white/70 group-hover:text-white'}`}>
                                     {project.name}
                                 </h3>
@@ -172,14 +181,174 @@ const ProjectItem = ({ project, isOverlay = false, isInFolder = false, dropIndic
 };
 
 
-const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOver = false, startRenaming = false, onRenameComplete, onDeleteClick }: {
+// --- Grid view: card with thumbnail ---
+const ProjectCard = ({ project }: { project: any }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+        id: project.id,
+        data: { type: 'project', project },
+    });
+    const style = {
+        transform: isDragging ? CSS.Transform.toString(transform) : undefined,
+        transition,
+        opacity: isDragging ? 0.3 : 1,
+        zIndex: isDragging ? 100 : 1,
+    };
+
+    const currentProject = useStore(s => s.project);
+    const loadProject = useStore(s => s.loadProject);
+    const setIsPlaying = useStore(s => s.setIsPlaying);
+    const setView = useStore(s => s.setView);
+    const duplicateProject = useStore(s => s.duplicateProject);
+    const deleteProject = useStore(s => s.deleteProject);
+    const renameProject = useStore(s => s.renameProject);
+    const thumbnailUrl = useStore(s => s.projectThumbnails[project.id]);
+
+    const [isRenaming, setIsRenaming] = useState(false);
+    const [newName, setNewName] = useState(project.name);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const isSelected = currentProject?.id === project.id;
+
+    const handleRenameSubmit = async () => {
+        if (newName.trim() && newName !== project.name) {
+            await renameProject(project.id, newName.trim());
+        }
+        setIsRenaming(false);
+    };
+
+    const handleCardClick = async () => {
+        await loadProject(project.id, 'dashboard');
+        setIsPlaying(true);
+    };
+
+    const handleOpenEditor = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (currentProject?.id === project.id) {
+            setView('editor');
+        } else {
+            loadProject(project.id, 'editor');
+        }
+    };
+
+    return (
+        <div ref={setNodeRef} style={style}>
+            <div
+                onClick={handleCardClick}
+                className={`group relative rounded-lg border overflow-hidden cursor-pointer transition-all ${
+                    isSelected
+                        ? 'border-[#D4AF37]/60 shadow-[0_0_15px_rgba(212,175,55,0.15)]'
+                        : 'border-white/5 hover:border-white/20'
+                }`}
+            >
+                {/* Thumbnail / placeholder */}
+                <div className="aspect-video bg-black relative">
+                    {thumbnailUrl ? (
+                        <img src={thumbnailUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                        <div className="absolute inset-0 flex items-center justify-center text-white/20">
+                            <Play size={24} />
+                        </div>
+                    )}
+                    {/* Drag handle (top-left, hover-visible) */}
+                    <div
+                        {...attributes}
+                        {...listeners}
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute top-1 left-1 p-1 rounded bg-black/60 text-white/60 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Drag to reorder"
+                    >
+                        <GripVertical size={12} />
+                    </div>
+                    {/* Hover actions (top-right) */}
+                    {!isDeleting && (
+                        <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setIsRenaming(true); }}
+                                className="p-1 rounded bg-black/60 text-white/60 hover:text-white"
+                                title="Rename"
+                            >
+                                <Edit2 size={12} />
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); duplicateProject(project.id); }}
+                                className="p-1 rounded bg-black/60 text-white/60 hover:text-white"
+                                title="Duplicate"
+                            >
+                                <Copy size={12} />
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setIsDeleting(true); }}
+                                className="p-1 rounded bg-black/60 text-white/60 hover:text-red-400"
+                                title="Delete"
+                            >
+                                <Trash2 size={12} />
+                            </button>
+                        </div>
+                    )}
+                    {isDeleting && (
+                        <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-2 text-center px-3"
+                        >
+                            <p className="text-[10px] uppercase tracking-wider text-white/80">Delete?</p>
+                            <div className="flex gap-2">
+                                <button onClick={() => deleteProject(project.id)} className="text-[10px] text-red-400 font-bold hover:underline">CONFIRM</button>
+                                <button onClick={() => setIsDeleting(false)} className="text-[10px] text-white/50 hover:text-white">CANCEL</button>
+                            </div>
+                        </div>
+                    )}
+                    {/* Open-editor button (bottom-right, hover) */}
+                    <button
+                        onClick={handleOpenEditor}
+                        className={`absolute bottom-1 right-1 px-2 py-1 rounded text-[9px] font-bold transition-all ${
+                            isSelected
+                                ? 'bg-[#D4AF37] text-black'
+                                : 'bg-black/60 text-white/80 opacity-0 group-hover:opacity-100 hover:bg-[#D4AF37] hover:text-black'
+                        }`}
+                    >
+                        OPEN
+                    </button>
+                </div>
+                {/* Name + meta */}
+                <div className="p-2 bg-[#1a1a1a]">
+                    {isRenaming ? (
+                        <input
+                            autoFocus
+                            value={newName}
+                            onClick={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            onChange={(e) => setNewName(e.target.value)}
+                            onBlur={handleRenameSubmit}
+                            onKeyDownCapture={(e) => {
+                                if (e.key === 'Enter') handleRenameSubmit();
+                                if (e.key === 'Escape') setIsRenaming(false);
+                            }}
+                            className="w-full bg-[#1a1a1a] border border-[#D4AF37]/50 rounded px-2 py-0.5 text-xs font-bold focus:outline-none"
+                        />
+                    ) : (
+                        <h3 className={`font-bold text-xs truncate ${isSelected ? 'text-[#D4AF37]' : 'text-white/80'}`}>
+                            {project.name}
+                        </h3>
+                    )}
+                    <p className="text-[9px] text-white/30 mt-0.5 truncate">
+                        {project.lastModified ? `${formatDistanceToNow(project.lastModified)} ago` : 'never saved'}
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOver = false, startRenaming = false, onRenameComplete, onDeleteClick, viewMode = 'list' }: {
     folder: any,
     projects: any[],
     overInfo?: { id: string, position: 'before' | 'after' } | null,
     isProjectDraggingOver?: boolean,
     startRenaming?: boolean,
     onRenameComplete?: () => void,
-    onDeleteClick?: (folder: any, projectCount: number) => void
+    onDeleteClick?: (folder: any, projectCount: number) => void,
+    viewMode?: 'list' | 'grid',
 }) => {
     const { setNodeRef, isOver, attributes, listeners, transform, transition, isDragging } = useSortable({
         id: folder.id,
@@ -295,14 +464,22 @@ const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOv
                 {folder.isOpen && (
                     <div className="pt-0.5 pb-1 min-h-[4px]">
                         <SortableContext items={projects.map(p => p.id)} strategy={verticalListSortingStrategy}>
-                            {projects.map(p => (
-                                <ProjectItem
-                                    key={p.id}
-                                    project={p}
-                                    isInFolder={true}
-                                    dropIndicator={(overInfo && overInfo.id === p.id) ? overInfo.position : null}
-                                />
-                            ))}
+                            {viewMode === 'grid' ? (
+                                <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 ml-6 mr-2 mt-2">
+                                    {projects.map(p => (
+                                        <ProjectCard key={p.id} project={p} />
+                                    ))}
+                                </div>
+                            ) : (
+                                projects.map(p => (
+                                    <ProjectItem
+                                        key={p.id}
+                                        project={p}
+                                        isInFolder={true}
+                                        dropIndicator={(overInfo && overInfo.id === p.id) ? overInfo.position : null}
+                                    />
+                                ))
+                            )}
                         </SortableContext>
                         {/* Empty state placeholder for dropping */}
                         {projects.length === 0 && (
@@ -355,6 +532,47 @@ const Dashboard: React.FC = () => {
     const [newlyCreatedFolderId, setNewlyCreatedFolderId] = useState<string | null>(null);
     const [folderToDelete, setFolderToDelete] = useState<{ id: string, name: string, projectCount: number } | null>(null);
     const [sidebarTab, setSidebarTab] = useState<'projects' | 'assets'>('projects');
+    const [dashboardView, setDashboardView] = useState<'list' | 'grid'>(() => {
+        const stored = typeof window !== 'undefined' ? localStorage.getItem('v2-dashboard-view') : null;
+        return stored === 'list' ? 'list' : 'grid';
+    });
+    const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+        const stored = typeof window !== 'undefined' ? localStorage.getItem('v2-dashboard-sidebar-width') : null;
+        const parsed = stored ? parseInt(stored, 10) : NaN;
+        if (Number.isFinite(parsed) && parsed >= 320) return parsed;
+        // Default width depends on view mode preference at first run.
+        const storedView = typeof window !== 'undefined' ? localStorage.getItem('v2-dashboard-view') : null;
+        return storedView === 'list' ? 420 : 780;
+    });
+    const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+    const [thumbRegenProgress, setThumbRegenProgress] = useState<{ done: number; total: number } | null>(null);
+
+    useEffect(() => {
+        localStorage.setItem('v2-dashboard-view', dashboardView);
+    }, [dashboardView]);
+
+    useEffect(() => {
+        localStorage.setItem('v2-dashboard-sidebar-width', String(sidebarWidth));
+    }, [sidebarWidth]);
+
+    useEffect(() => {
+        if (!isResizingSidebar) return;
+        const onMove = (e: MouseEvent) => {
+            const next = Math.max(320, Math.min(window.innerWidth - 200, e.clientX));
+            setSidebarWidth(next);
+        };
+        const onUp = () => setIsResizingSidebar(false);
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        return () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        };
+    }, [isResizingSidebar]);
     const canvasWrapperRef = React.useRef<HTMLDivElement>(null);
     const sidebarScrollRef = React.useRef<HTMLDivElement>(null);
 
@@ -472,7 +690,10 @@ const Dashboard: React.FC = () => {
         >
             <div className="h-screen w-screen bg-[#1a1a1a] text-white flex overflow-hidden">
                 {/* SIDEBAR */}
-                <div className="w-[420px] flex flex-col border-r border-white/10 bg-[#1a1a1a] z-20">
+                <div
+                    style={{ width: sidebarWidth }}
+                    className="relative flex-shrink-0 flex flex-col border-r border-white/10 bg-[#1a1a1a] z-20"
+                >
                     <div className="p-6 border-b border-white/10">
                         <header className="mb-6 flex items-center justify-between">
                             <div>
@@ -507,6 +728,25 @@ const Dashboard: React.FC = () => {
                                                 Admin Dashboard
                                             </button>
                                         )}
+                                        <button
+                                            disabled={thumbRegenProgress !== null}
+                                            onClick={async () => {
+                                                setIsUserMenuOpen(false);
+                                                setThumbRegenProgress({ done: 0, total: savedProjects.length });
+                                                try {
+                                                    await useStore.getState().regenerateAllProjectThumbnails(
+                                                        (done, total) => setThumbRegenProgress({ done, total })
+                                                    );
+                                                } finally {
+                                                    setThumbRegenProgress(null);
+                                                }
+                                            }}
+                                            className="w-full flex items-center gap-3 px-4 py-2 text-[10px] uppercase tracking-widest text-white/70 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-wait"
+                                        >
+                                            <RefreshCw size={12} className="text-[#D4AF37]" />
+                                            Regenerate Thumbnails
+                                        </button>
+                                        <div className="h-px bg-white/5 my-1" />
                                         <button
                                             onClick={async () => {
                                                 await useStore.getState().signOut();
@@ -575,12 +815,28 @@ const Dashboard: React.FC = () => {
 
                         <div className="relative">
                             <input
-                                className="w-full bg-[#252525] rounded px-3 py-2 pl-9 text-sm focus:outline-none focus:border-[#D4AF37]/50 border border-transparent"
+                                className="w-full bg-[#252525] rounded px-3 py-2 pl-9 pr-24 text-sm focus:outline-none focus:border-[#D4AF37]/50 border border-transparent"
                                 placeholder="Search rituals..."
                                 value={searchTerm}
                                 onChange={e => setSearchTerm(e.target.value)}
                             />
                             <FolderIcon className="absolute left-3 top-2.5 text-white/20" size={14} />
+                            <div className="absolute right-1 top-1 flex gap-0.5 p-0.5 bg-[#1a1a1a] rounded">
+                                <button
+                                    onClick={() => setDashboardView('list')}
+                                    title="List view (folders + projects)"
+                                    className={`p-1.5 rounded transition-colors ${dashboardView === 'list' ? 'bg-[#252525] text-[#D4AF37]' : 'text-white/40 hover:text-white/70'}`}
+                                >
+                                    <List size={14} />
+                                </button>
+                                <button
+                                    onClick={() => setDashboardView('grid')}
+                                    title="Thumbnail grid (all projects)"
+                                    className={`p-1.5 rounded transition-colors ${dashboardView === 'grid' ? 'bg-[#252525] text-[#D4AF37]' : 'text-white/40 hover:text-white/70'}`}
+                                >
+                                    <LayoutGrid size={14} />
+                                </button>
+                            </div>
                         </div>
                         </>
                         )}
@@ -588,7 +844,57 @@ const Dashboard: React.FC = () => {
 
                     {sidebarTab === 'projects' ? (
                     <div className="flex-1 overflow-y-auto p-4" ref={sidebarScrollRef}>
-                        {isSearching ? (
+                        {dashboardView === 'grid' ? (
+                            // Thumbnail grid: same folder structure + ordering as list view,
+                            // just with cards instead of rows inside each section.
+                            isSearching ? (
+                                filteredProjects.length === 0 ? (
+                                    <div className="h-32 border-2 border-dashed border-white/5 rounded-xl flex flex-col items-center justify-center text-white/20">
+                                        <p className="text-[10px] uppercase tracking-widest">No matches</p>
+                                    </div>
+                                ) : (
+                                    <SortableContext items={filteredProjects.map(p => p.id)} strategy={verticalListSortingStrategy}>
+                                        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+                                            {filteredProjects.map(p => <ProjectCard key={p.id} project={p} />)}
+                                        </div>
+                                    </SortableContext>
+                                )
+                            ) : (
+                                <div className="space-y-3">
+                                    <SortableContext items={[...folders.map(f => f.id), ...rootProjects.map(p => p.id)]} strategy={verticalListSortingStrategy}>
+                                        {folders.map(folder => (
+                                            <FolderDropArea
+                                                key={folder.id}
+                                                folder={folder}
+                                                projects={savedProjects.filter(p => p.folderId === folder.id).sort((a, b) => (b.order || 0) - (a.order || 0))}
+                                                overInfo={overInfo}
+                                                isProjectDraggingOver={isDraggingProject}
+                                                viewMode="grid"
+                                                startRenaming={folder.id === newlyCreatedFolderId}
+                                                onRenameComplete={() => {
+                                                    if (folder.id === newlyCreatedFolderId) {
+                                                        setNewlyCreatedFolderId(null);
+                                                    }
+                                                }}
+                                                onDeleteClick={(folderData, count) => setFolderToDelete({ id: folderData.id, name: folderData.name, projectCount: count })}
+                                            />
+                                        ))}
+                                        {rootProjects.length > 0 && (
+                                            <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 mt-2">
+                                                {rootProjects.map(p => <ProjectCard key={p.id} project={p} />)}
+                                            </div>
+                                        )}
+                                    </SortableContext>
+                                    <RootDropzone active={isDraggingProject && !searchTerm} />
+                                    {rootProjects.length === 0 && folders.length === 0 && (
+                                        <div className="h-32 border-2 border-dashed border-white/5 rounded-xl flex flex-col items-center justify-center text-white/20">
+                                            <Plus className="mb-2 opacity-50" size={24} />
+                                            <p className="text-[10px] uppercase tracking-widest">No Projects Yet</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )
+                        ) : isSearching ? (
                             // Flat List
                             filteredProjects.map(p => <ProjectItem key={p.id} project={p} />)
                         ) : (
@@ -641,6 +947,23 @@ const Dashboard: React.FC = () => {
                         </div>
                     )}
                 </div>
+
+                {/* Resize handle between sidebar and preview */}
+                <div
+                    onMouseDown={(e) => { e.preventDefault(); setIsResizingSidebar(true); }}
+                    className={`w-1 cursor-col-resize z-30 transition-colors ${isResizingSidebar ? 'bg-[#D4AF37]' : 'bg-transparent hover:bg-[#D4AF37]/50'}`}
+                    title="Drag to resize"
+                />
+
+                {/* Regen-thumbnails progress (fixed top-center while running) */}
+                {thumbRegenProgress !== null && (
+                    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 bg-[#1a1a1a]/95 border border-[#D4AF37]/40 rounded-full px-4 py-2 shadow-2xl backdrop-blur-sm">
+                        <RefreshCw size={14} className="text-[#D4AF37] animate-spin" />
+                        <span className="text-[10px] uppercase tracking-widest text-white/80 font-bold">
+                            Regenerating thumbnails — {thumbRegenProgress.done} / {thumbRegenProgress.total}
+                        </span>
+                    </div>
+                )}
 
                 {/* PREVIEW AREA */}
                 <div className="flex-1 bg-black relative flex flex-col items-center justify-center overflow-hidden" ref={canvasWrapperRef}>

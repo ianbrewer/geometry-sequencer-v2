@@ -55,6 +55,15 @@ export interface GradientStop {
     offset: number; // 0-100
     color: string;
 }
+
+export interface SavedColor {
+    id: string;
+    color: string; // hex
+}
+export interface SavedGradient {
+    id: string;
+    stops: GradientStop[];
+}
 export type EasingType =
     | 'linear'
     | 'easeInSine' | 'easeOutSine' | 'easeInOutSine'
@@ -288,6 +297,9 @@ export interface AppState {
     folders: Folder[];
     assetFolders: AssetFolder[];
     assetsByFolder: Record<string, Asset[]>; // keyed by assetFolder.id ('' for unfiled)
+    projectThumbnails: Record<string, string>; // projectId -> signed URL
+    savedColors: SavedColor[];
+    savedGradients: SavedGradient[];
     user: User | null;
     session: Session | null;
     setUser: (session: Session | null) => void;
@@ -305,6 +317,17 @@ export interface AppState {
     signedUrlForAsset: (id: string) => Promise<string | null>;
     seedDefaultAssetFolders: () => Promise<void>;
 
+    // Project thumbnail actions
+    uploadProjectThumbnail: (projectId: string, blob: Blob) => Promise<void>;
+    fetchProjectThumbnails: () => Promise<void>;
+    regenerateAllProjectThumbnails: (onProgress?: (done: number, total: number) => void) => Promise<void>;
+
+    // Global saved palette (cross-project, browser-scoped via localStorage)
+    addSavedColor: (color: string) => void;
+    deleteSavedColor: (id: string) => void;
+    addSavedGradient: (stops: GradientStop[]) => void;
+    deleteSavedGradient: (id: string) => void;
+
     // Folder Actions
     createFolder: (name: string) => Promise<string | undefined>;
     deleteFolder: (id: string, deleteProjects?: boolean) => void;
@@ -319,6 +342,7 @@ export interface AppState {
     selectedLayerIds: string[]; // New
     activeKeyframeId: string | null; // Changed from activeKeyState
     activeInspectorTab: InspectorTabType;
+    isFreshProject: boolean;
     clipboardLayers: Layer[];
     clipboardKeyframe: Keyframe<any> | null; // Changed from clipboardKeyState which was complex
     exportSettings: ExportSettings;
@@ -351,6 +375,7 @@ export interface AppState {
     setSelectedLayerIds: (ids: string[]) => void; // New
     setActiveKeyframeId: (id: string | null, layerId?: string) => void; // Changed
     setActiveInspectorTab: (tab: InspectorTabType) => void;
+    clearFreshProject: () => void;
     addLayer: () => void;
     updateLayer: (id: string, updates: Partial<Layer>, skipHistory?: boolean) => void;
     toggleLayerVisibility: (id: string) => void;
