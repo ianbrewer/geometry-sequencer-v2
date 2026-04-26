@@ -320,6 +320,7 @@ export interface AppState {
     // Project thumbnail actions
     uploadProjectThumbnail: (projectId: string, blob: Blob) => Promise<void>;
     fetchProjectThumbnails: () => Promise<void>;
+    regenerateAllProjectThumbnails: (onProgress?: (done: number, total: number) => void) => Promise<void>;
 
     // Global saved palette (cross-project, browser-scoped via localStorage)
     addSavedColor: (color: string) => void;

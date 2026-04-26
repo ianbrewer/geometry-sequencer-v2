@@ -6,7 +6,11 @@ export function setPixiAppProvider(p: (() => Application | null) | null) {
     appProvider = p;
 }
 
-export async function captureThumbnail(width = 320, height = 180): Promise<Blob | null> {
+export async function captureThumbnail(
+    width = 320,
+    height = 180,
+    backgroundColor = '#000000',
+): Promise<Blob | null> {
     const app = appProvider?.();
     if (!app || !app.renderer) return null;
 
@@ -24,13 +28,19 @@ export async function captureThumbnail(width = 320, height = 180): Promise<Blob 
     const ctx = target.getContext('2d');
     if (!ctx) return null;
 
-    ctx.fillStyle = '#000';
+    // Pixi v8's extract.canvas(stage) renders into a fresh transparent target,
+    // so the renderer's background color isn't in `source`. Fill the project
+    // background here so the thumbnail matches what the user sees on screen.
+    ctx.fillStyle = backgroundColor;
     ctx.fillRect(0, 0, width, height);
 
     const sw = source.width;
     const sh = source.height;
     if (sw && sh) {
-        const scale = Math.min(width / sw, height / sh);
+        // object-fit: cover. Scale to whichever dimension fills the target,
+        // and let the other axis overflow + clip — thumbnail is always 100%
+        // filled regardless of source aspect.
+        const scale = Math.max(width / sw, height / sh);
         const dw = sw * scale;
         const dh = sh * scale;
         ctx.drawImage(source, (width - dw) / 2, (height - dh) / 2, dw, dh);

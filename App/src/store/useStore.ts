@@ -1103,7 +1103,7 @@ export const useStore = create<AppState>((set, get) => {
 
                 // Snapshot the live canvas to a thumbnail and upload (fire-and-forget;
                 // we don't want save UI to block on this).
-                captureThumbnail().then((blob) => {
+                captureThumbnail(320, 180, updatedProject.backgroundColor || '#000000').then((blob) => {
                     if (blob) get().uploadProjectThumbnail(updatedProject.id, blob);
                 });
             } catch (e) {
@@ -2069,6 +2069,38 @@ export const useStore = create<AppState>((set, get) => {
             const next = get().savedGradients.filter((g) => g.id !== id);
             set({ savedGradients: next });
             saveJsonArray(SAVED_GRADIENTS_KEY, next);
+        },
+
+        regenerateAllProjectThumbnails: async (onProgress) => {
+            const { savedProjects, project: original } = get();
+            const originalId = original?.id;
+
+            for (let i = 0; i < savedProjects.length; i++) {
+                const meta = savedProjects[i];
+                onProgress?.(i, savedProjects.length);
+                try {
+                    await get().loadProject(meta.id, 'dashboard');
+                    // Give Pixi time to mount the new project + render a frame.
+                    await new Promise((r) => setTimeout(r, 800));
+                    const bg = get().project?.backgroundColor || '#000000';
+                    const blob = await captureThumbnail(320, 180, bg);
+                    if (blob) {
+                        await get().uploadProjectThumbnail(meta.id, blob);
+                    }
+                } catch (e) {
+                    console.warn(`Thumbnail regen failed for ${meta.id}`, e);
+                }
+            }
+
+            // Restore the project the user was on before we started.
+            if (originalId && originalId !== get().project?.id) {
+                try {
+                    await get().loadProject(originalId, 'dashboard');
+                } catch {
+                    // Best effort; if it fails the user can just click a project.
+                }
+            }
+            onProgress?.(savedProjects.length, savedProjects.length);
         },
 
         fetchProjectThumbnails: async () => {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Plus, Folder as FolderIcon, Clock, Copy, Edit2, Trash2, ArrowRight, Play, ChevronRight, ChevronDown, FolderPlus, Share2, LogOut, User as UserIcon, GripVertical, LayoutGrid, List } from 'lucide-react';
+import { Plus, Folder as FolderIcon, Clock, Copy, Edit2, Trash2, ArrowRight, Play, ChevronRight, ChevronDown, FolderPlus, Share2, LogOut, User as UserIcon, GripVertical, LayoutGrid, List, RefreshCw } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { formatDistanceToNow } from 'date-fns';
 import GeometryCanvas from './GeometryCanvas';
@@ -340,14 +340,15 @@ const ProjectCard = ({ project }: { project: any }) => {
     );
 };
 
-const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOver = false, startRenaming = false, onRenameComplete, onDeleteClick }: {
+const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOver = false, startRenaming = false, onRenameComplete, onDeleteClick, viewMode = 'list' }: {
     folder: any,
     projects: any[],
     overInfo?: { id: string, position: 'before' | 'after' } | null,
     isProjectDraggingOver?: boolean,
     startRenaming?: boolean,
     onRenameComplete?: () => void,
-    onDeleteClick?: (folder: any, projectCount: number) => void
+    onDeleteClick?: (folder: any, projectCount: number) => void,
+    viewMode?: 'list' | 'grid',
 }) => {
     const { setNodeRef, isOver, attributes, listeners, transform, transition, isDragging } = useSortable({
         id: folder.id,
@@ -463,14 +464,22 @@ const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOv
                 {folder.isOpen && (
                     <div className="pt-0.5 pb-1 min-h-[4px]">
                         <SortableContext items={projects.map(p => p.id)} strategy={verticalListSortingStrategy}>
-                            {projects.map(p => (
-                                <ProjectItem
-                                    key={p.id}
-                                    project={p}
-                                    isInFolder={true}
-                                    dropIndicator={(overInfo && overInfo.id === p.id) ? overInfo.position : null}
-                                />
-                            ))}
+                            {viewMode === 'grid' ? (
+                                <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 ml-6 mr-2 mt-2">
+                                    {projects.map(p => (
+                                        <ProjectCard key={p.id} project={p} />
+                                    ))}
+                                </div>
+                            ) : (
+                                projects.map(p => (
+                                    <ProjectItem
+                                        key={p.id}
+                                        project={p}
+                                        isInFolder={true}
+                                        dropIndicator={(overInfo && overInfo.id === p.id) ? overInfo.position : null}
+                                    />
+                                ))
+                            )}
                         </SortableContext>
                         {/* Empty state placeholder for dropping */}
                         {projects.length === 0 && (
@@ -536,6 +545,7 @@ const Dashboard: React.FC = () => {
         return storedView === 'list' ? 420 : 780;
     });
     const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+    const [thumbRegenProgress, setThumbRegenProgress] = useState<{ done: number; total: number } | null>(null);
 
     useEffect(() => {
         localStorage.setItem('v2-dashboard-view', dashboardView);
@@ -719,6 +729,25 @@ const Dashboard: React.FC = () => {
                                             </button>
                                         )}
                                         <button
+                                            disabled={thumbRegenProgress !== null}
+                                            onClick={async () => {
+                                                setIsUserMenuOpen(false);
+                                                setThumbRegenProgress({ done: 0, total: savedProjects.length });
+                                                try {
+                                                    await useStore.getState().regenerateAllProjectThumbnails(
+                                                        (done, total) => setThumbRegenProgress({ done, total })
+                                                    );
+                                                } finally {
+                                                    setThumbRegenProgress(null);
+                                                }
+                                            }}
+                                            className="w-full flex items-center gap-3 px-4 py-2 text-[10px] uppercase tracking-widest text-white/70 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-wait"
+                                        >
+                                            <RefreshCw size={12} className="text-[#D4AF37]" />
+                                            Regenerate Thumbnails
+                                        </button>
+                                        <div className="h-px bg-white/5 my-1" />
+                                        <button
                                             onClick={async () => {
                                                 await useStore.getState().signOut();
                                                 useStore.getState().setView('landing');
@@ -816,28 +845,55 @@ const Dashboard: React.FC = () => {
                     {sidebarTab === 'projects' ? (
                     <div className="flex-1 overflow-y-auto p-4" ref={sidebarScrollRef}>
                         {dashboardView === 'grid' ? (
-                            // Thumbnail grid: flat list of every project, sorted by lastModified.
-                            // Folders are intentionally hidden in this mode — manage them in list view.
-                            (() => {
-                                const gridProjects = (isSearching ? filteredProjects : savedProjects)
-                                    .slice()
-                                    .sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
-                                if (gridProjects.length === 0) {
-                                    return (
+                            // Thumbnail grid: same folder structure + ordering as list view,
+                            // just with cards instead of rows inside each section.
+                            isSearching ? (
+                                filteredProjects.length === 0 ? (
+                                    <div className="h-32 border-2 border-dashed border-white/5 rounded-xl flex flex-col items-center justify-center text-white/20">
+                                        <p className="text-[10px] uppercase tracking-widest">No matches</p>
+                                    </div>
+                                ) : (
+                                    <SortableContext items={filteredProjects.map(p => p.id)} strategy={verticalListSortingStrategy}>
+                                        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+                                            {filteredProjects.map(p => <ProjectCard key={p.id} project={p} />)}
+                                        </div>
+                                    </SortableContext>
+                                )
+                            ) : (
+                                <div className="space-y-3">
+                                    <SortableContext items={[...folders.map(f => f.id), ...rootProjects.map(p => p.id)]} strategy={verticalListSortingStrategy}>
+                                        {folders.map(folder => (
+                                            <FolderDropArea
+                                                key={folder.id}
+                                                folder={folder}
+                                                projects={savedProjects.filter(p => p.folderId === folder.id).sort((a, b) => (b.order || 0) - (a.order || 0))}
+                                                overInfo={overInfo}
+                                                isProjectDraggingOver={isDraggingProject}
+                                                viewMode="grid"
+                                                startRenaming={folder.id === newlyCreatedFolderId}
+                                                onRenameComplete={() => {
+                                                    if (folder.id === newlyCreatedFolderId) {
+                                                        setNewlyCreatedFolderId(null);
+                                                    }
+                                                }}
+                                                onDeleteClick={(folderData, count) => setFolderToDelete({ id: folderData.id, name: folderData.name, projectCount: count })}
+                                            />
+                                        ))}
+                                        {rootProjects.length > 0 && (
+                                            <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 mt-2">
+                                                {rootProjects.map(p => <ProjectCard key={p.id} project={p} />)}
+                                            </div>
+                                        )}
+                                    </SortableContext>
+                                    <RootDropzone active={isDraggingProject && !searchTerm} />
+                                    {rootProjects.length === 0 && folders.length === 0 && (
                                         <div className="h-32 border-2 border-dashed border-white/5 rounded-xl flex flex-col items-center justify-center text-white/20">
                                             <Plus className="mb-2 opacity-50" size={24} />
                                             <p className="text-[10px] uppercase tracking-widest">No Projects Yet</p>
                                         </div>
-                                    );
-                                }
-                                return (
-                                    <SortableContext items={gridProjects.map(p => p.id)} strategy={verticalListSortingStrategy}>
-                                        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
-                                            {gridProjects.map(p => <ProjectCard key={p.id} project={p} />)}
-                                        </div>
-                                    </SortableContext>
-                                );
-                            })()
+                                    )}
+                                </div>
+                            )
                         ) : isSearching ? (
                             // Flat List
                             filteredProjects.map(p => <ProjectItem key={p.id} project={p} />)
@@ -898,6 +954,16 @@ const Dashboard: React.FC = () => {
                     className={`w-1 cursor-col-resize z-30 transition-colors ${isResizingSidebar ? 'bg-[#D4AF37]' : 'bg-transparent hover:bg-[#D4AF37]/50'}`}
                     title="Drag to resize"
                 />
+
+                {/* Regen-thumbnails progress (fixed top-center while running) */}
+                {thumbRegenProgress !== null && (
+                    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 bg-[#1a1a1a]/95 border border-[#D4AF37]/40 rounded-full px-4 py-2 shadow-2xl backdrop-blur-sm">
+                        <RefreshCw size={14} className="text-[#D4AF37] animate-spin" />
+                        <span className="text-[10px] uppercase tracking-widest text-white/80 font-bold">
+                            Regenerating thumbnails — {thumbRegenProgress.done} / {thumbRegenProgress.total}
+                        </span>
+                    </div>
+                )}
 
                 {/* PREVIEW AREA */}
                 <div className="flex-1 bg-black relative flex flex-col items-center justify-center overflow-hidden" ref={canvasWrapperRef}>
