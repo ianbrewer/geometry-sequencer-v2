@@ -45,8 +45,8 @@ For UI stages, run `npm run dev` from `App/` (Vite on :3008) and exercise the fe
 - [ ] Lint clean (`npm run lint`)
 - [ ] Golden-path manual test passes
 - [ ] Docs updated if the contract changed (CLAUDE.md, project.md, or component-level docs)
-- [ ] [TODO.md](../TODO.md) items the stage closes are moved to `## Done` with the PR/commit SHA
-- [ ] New follow-ups discovered during the stage are appended to [TODO.md](../TODO.md)
+- [ ] [tasks.tsv](../tasks.tsv) rows the stage closes are flipped to `Completed` with the PR/commit SHA noted in the `notes` column
+- [ ] New follow-ups discovered during the stage are appended as new rows in [tasks.tsv](../tasks.tsv)
 
 ## Agent handoff
 
@@ -57,5 +57,5 @@ Each stage has a self-contained prompt in [plan-asset-based-shapes.md § 6](../p
 - [project.md](./project.md) — the what and why
 - [process.md](./process.md) — this file, the how
 - [../plan-asset-based-shapes.md](../plan-asset-based-shapes.md) — the detailed plan for the active initiative
-- [../TODO.md](../TODO.md) — running follow-ups, always check before starting work
+- [../tasks.tsv](../tasks.tsv) — running follow-ups + granular task list; always check before starting work
 - [../CLAUDE.md](../CLAUDE.md) — agent-facing repo rules; must stay accurate
