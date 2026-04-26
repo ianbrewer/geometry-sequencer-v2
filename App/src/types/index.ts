@@ -288,6 +288,7 @@ export interface AppState {
     folders: Folder[];
     assetFolders: AssetFolder[];
     assetsByFolder: Record<string, Asset[]>; // keyed by assetFolder.id ('' for unfiled)
+    projectThumbnails: Record<string, string>; // projectId -> signed URL
     user: User | null;
     session: Session | null;
     setUser: (session: Session | null) => void;
@@ -304,6 +305,10 @@ export interface AppState {
     reorderAssets: (folderId: string | null, startIndex: number, endIndex: number) => Promise<void>;
     signedUrlForAsset: (id: string) => Promise<string | null>;
     seedDefaultAssetFolders: () => Promise<void>;
+
+    // Project thumbnail actions
+    uploadProjectThumbnail: (projectId: string, blob: Blob) => Promise<void>;
+    fetchProjectThumbnails: () => Promise<void>;
 
     // Folder Actions
     createFolder: (name: string) => Promise<string | undefined>;

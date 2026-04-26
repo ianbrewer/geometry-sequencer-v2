@@ -4,6 +4,11 @@ import type { AppState, Project, Layer, LayerKeyframe, ProjectMetadata, Folder, 
 import { DEFAULT_ANIMATABLES } from '../constants/defaults';
 import { sanitizeSvgFile } from '../utils/sanitizeSvg';
 import { optimizeAsset } from '../utils/assetOptimizer';
+import { captureThumbnail } from '../utils/thumbnailGenerator';
+
+const PROJECT_THUMBNAIL_PREFIX = '_project-thumbnails';
+const PROJECT_THUMBNAIL_BUCKET = 'v2-user-assets';
+const PROJECT_THUMBNAIL_TTL = 60 * 60 * 24; // 24h signed URL
 import {
     SEED_FOLDER_NAMES,
     LEGACY_TYPE_TO_SEED_FOLDER,
@@ -187,6 +192,7 @@ export const useStore = create<AppState>((set, get) => {
         folders: [],
         assetFolders: [],
         assetsByFolder: {},
+        projectThumbnails: {},
         user: null,
         session: null,
         adminProfiles: [],
@@ -208,7 +214,7 @@ export const useStore = create<AppState>((set, get) => {
         },
         signOut: async () => {
             await supabase.auth.signOut();
-            set({ session: null, user: null, savedProjects: [], folders: [], assetFolders: [], assetsByFolder: {} });
+            set({ session: null, user: null, savedProjects: [], folders: [], assetFolders: [], assetsByFolder: {}, projectThumbnails: {} });
         },
         exportSettings: { width: 1080, height: 1080, isActive: false, pixelRatio: 1 },
         currentTime: 0,
@@ -1063,6 +1069,12 @@ export const useStore = create<AppState>((set, get) => {
 
                 set({ project: updatedProject });
                 await get().fetchProjects();
+
+                // Snapshot the live canvas to a thumbnail and upload (fire-and-forget;
+                // we don't want save UI to block on this).
+                captureThumbnail().then((blob) => {
+                    if (blob) get().uploadProjectThumbnail(updatedProject.id, blob);
+                });
             } catch (e) {
                 console.error('Failed to save project', e);
             }
@@ -1495,6 +1507,7 @@ export const useStore = create<AppState>((set, get) => {
                 }));
 
                 set({ savedProjects: projects, folders });
+                get().fetchProjectThumbnails();
             } catch (e) {
                 console.error("Failed to fetch data", e);
             }
@@ -1969,6 +1982,62 @@ export const useStore = create<AppState>((set, get) => {
             }
         },
 
+        uploadProjectThumbnail: async (projectId, blob) => {
+            const { user } = get();
+            if (!user) return;
+            const path = `${user.id}/${PROJECT_THUMBNAIL_PREFIX}/${projectId}.png`;
+            const { error } = await supabase.storage
+                .from(PROJECT_THUMBNAIL_BUCKET)
+                .upload(path, blob, { contentType: 'image/png', upsert: true });
+            if (error) {
+                console.warn('Project thumbnail upload failed', error);
+                return;
+            }
+            const { data: signed } = await supabase.storage
+                .from(PROJECT_THUMBNAIL_BUCKET)
+                .createSignedUrl(path, PROJECT_THUMBNAIL_TTL);
+            if (signed?.signedUrl) {
+                set((state) => ({
+                    projectThumbnails: {
+                        ...state.projectThumbnails,
+                        // Cache-bust so the new image replaces the old in <img> tags.
+                        [projectId]: `${signed.signedUrl}#t=${Date.now()}`,
+                    },
+                }));
+            }
+        },
+
+        fetchProjectThumbnails: async () => {
+            const { user } = get();
+            if (!user) {
+                set({ projectThumbnails: {} });
+                return;
+            }
+            const prefix = `${user.id}/${PROJECT_THUMBNAIL_PREFIX}`;
+            const { data: list, error } = await supabase.storage
+                .from(PROJECT_THUMBNAIL_BUCKET)
+                .list(prefix, { limit: 1000 });
+            if (error || !list?.length) return;
+
+            const paths = list
+                .filter((item) => item.name.endsWith('.png'))
+                .map((item) => `${prefix}/${item.name}`);
+            if (!paths.length) return;
+
+            const { data: signed, error: sErr } = await supabase.storage
+                .from(PROJECT_THUMBNAIL_BUCKET)
+                .createSignedUrls(paths, PROJECT_THUMBNAIL_TTL);
+            if (sErr || !signed) return;
+
+            const map: Record<string, string> = {};
+            signed.forEach((s, i) => {
+                if (!s.signedUrl) return;
+                const projectId = paths[i].split('/').pop()!.replace(/\.png$/, '');
+                map[projectId] = s.signedUrl;
+            });
+            set({ projectThumbnails: map });
+        },
+
         signedUrlForAsset: async (id: string) => {
             const { user } = get();
             if (!user) return null;
@@ -2055,6 +2124,10 @@ export const useStore = create<AppState>((set, get) => {
             }
             try {
                 await supabase.from('projects').delete().eq('id', id).eq('user_id', user.id);
+                // Best-effort: remove the project's thumbnail. Stays a no-op if absent.
+                supabase.storage
+                    .from(PROJECT_THUMBNAIL_BUCKET)
+                    .remove([`${user.id}/${PROJECT_THUMBNAIL_PREFIX}/${id}.png`]);
                 await get().fetchProjects();
             } catch (e) {
                 console.error('Failed to delete project', e);

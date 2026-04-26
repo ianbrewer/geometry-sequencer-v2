@@ -65,6 +65,7 @@ const ProjectItem = ({ project, isOverlay = false, isInFolder = false, dropIndic
     const duplicateProject = useStore(s => s.duplicateProject);
     const deleteProject = useStore(s => s.deleteProject);
     const renameProject = useStore(s => s.renameProject);
+    const thumbnailUrl = useStore(s => s.projectThumbnails[project.id]);
 
     const [isRenaming, setIsRenaming] = useState(false);
     const [newName, setNewName] = useState(project.name);
@@ -130,8 +131,16 @@ const ProjectItem = ({ project, isOverlay = false, isInFolder = false, dropIndic
                                 }}
                             />
                         ) : (
-                            <div className="flex items-center gap-2">
-                                <ArrowRight size={10} className={`${isSelected ? 'text-[#D4AF37]' : 'text-white/20'}`} />
+                            <div className="flex items-center gap-2 min-w-0">
+                                <ArrowRight size={10} className={`${isSelected ? 'text-[#D4AF37]' : 'text-white/20'} shrink-0`} />
+                                {thumbnailUrl ? (
+                                    <img
+                                        src={thumbnailUrl}
+                                        alt=""
+                                        className="w-8 h-5 object-cover rounded-sm bg-black border border-white/5 shrink-0"
+                                        loading="lazy"
+                                    />
+                                ) : null}
                                 <h3 className={`font-bold text-xs truncate ${isSelected ? 'text-white' : 'text-white/70 group-hover:text-white'}`}>
                                     {project.name}
                                 </h3>
