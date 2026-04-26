@@ -55,6 +55,15 @@ export interface GradientStop {
     offset: number; // 0-100
     color: string;
 }
+
+export interface SavedColor {
+    id: string;
+    color: string; // hex
+}
+export interface SavedGradient {
+    id: string;
+    stops: GradientStop[];
+}
 export type EasingType =
     | 'linear'
     | 'easeInSine' | 'easeOutSine' | 'easeInOutSine'
@@ -289,6 +298,8 @@ export interface AppState {
     assetFolders: AssetFolder[];
     assetsByFolder: Record<string, Asset[]>; // keyed by assetFolder.id ('' for unfiled)
     projectThumbnails: Record<string, string>; // projectId -> signed URL
+    savedColors: SavedColor[];
+    savedGradients: SavedGradient[];
     user: User | null;
     session: Session | null;
     setUser: (session: Session | null) => void;
@@ -309,6 +320,12 @@ export interface AppState {
     // Project thumbnail actions
     uploadProjectThumbnail: (projectId: string, blob: Blob) => Promise<void>;
     fetchProjectThumbnails: () => Promise<void>;
+
+    // Global saved palette (cross-project, browser-scoped via localStorage)
+    addSavedColor: (color: string) => void;
+    deleteSavedColor: (id: string) => void;
+    addSavedGradient: (stops: GradientStop[]) => void;
+    deleteSavedGradient: (id: string) => void;
 
     // Folder Actions
     createFolder: (name: string) => Promise<string | undefined>;

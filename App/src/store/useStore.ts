@@ -5,10 +5,39 @@ import { DEFAULT_ANIMATABLES } from '../constants/defaults';
 import { sanitizeSvgFile } from '../utils/sanitizeSvg';
 import { optimizeAsset } from '../utils/assetOptimizer';
 import { captureThumbnail } from '../utils/thumbnailGenerator';
+import type { SavedColor, SavedGradient, GradientStop } from '../types';
 
 const PROJECT_THUMBNAIL_PREFIX = '_project-thumbnails';
 const PROJECT_THUMBNAIL_BUCKET = 'v2-user-assets';
 const PROJECT_THUMBNAIL_TTL = 60 * 60 * 24; // 24h signed URL
+
+const SAVED_COLORS_KEY = 'v2-saved-colors';
+const SAVED_GRADIENTS_KEY = 'v2-saved-gradients';
+
+function loadJsonArray<T>(key: string): T[] {
+    if (typeof window === 'undefined') return [];
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? (parsed as T[]) : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveJsonArray<T>(key: string, value: T[]): void {
+    if (typeof window === 'undefined') return;
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+        // Quota exceeded or storage disabled — silently drop.
+    }
+}
+
+function makeId(): string {
+    return Math.random().toString(36).slice(2, 11);
+}
 import {
     SEED_FOLDER_NAMES,
     LEGACY_TYPE_TO_SEED_FOLDER,
@@ -193,6 +222,8 @@ export const useStore = create<AppState>((set, get) => {
         assetFolders: [],
         assetsByFolder: {},
         projectThumbnails: {},
+        savedColors: loadJsonArray<SavedColor>(SAVED_COLORS_KEY),
+        savedGradients: loadJsonArray<SavedGradient>(SAVED_GRADIENTS_KEY),
         user: null,
         session: null,
         adminProfiles: [],
@@ -2005,6 +2036,39 @@ export const useStore = create<AppState>((set, get) => {
                     },
                 }));
             }
+        },
+
+        addSavedColor: (color: string) => {
+            const trimmed = color.trim().toLowerCase();
+            if (!trimmed) return;
+            // Skip exact duplicates so the palette doesn't pile up.
+            if (get().savedColors.some((c) => c.color.toLowerCase() === trimmed)) return;
+            const next = [{ id: makeId(), color: trimmed }, ...get().savedColors];
+            set({ savedColors: next });
+            saveJsonArray(SAVED_COLORS_KEY, next);
+        },
+        deleteSavedColor: (id: string) => {
+            const next = get().savedColors.filter((c) => c.id !== id);
+            set({ savedColors: next });
+            saveJsonArray(SAVED_COLORS_KEY, next);
+        },
+        addSavedGradient: (stops: GradientStop[]) => {
+            if (!stops || stops.length < 2) return;
+            // Strip stop ids when persisting so the saved entry compares cleanly
+            // against future "is this gradient already saved" checks if we add them.
+            const cleanStops = stops.map((s) => ({
+                id: makeId(),
+                offset: s.offset,
+                color: s.color,
+            }));
+            const next = [{ id: makeId(), stops: cleanStops }, ...get().savedGradients];
+            set({ savedGradients: next });
+            saveJsonArray(SAVED_GRADIENTS_KEY, next);
+        },
+        deleteSavedGradient: (id: string) => {
+            const next = get().savedGradients.filter((g) => g.id !== id);
+            set({ savedGradients: next });
+            saveJsonArray(SAVED_GRADIENTS_KEY, next);
         },
 
         fetchProjectThumbnails: async () => {
