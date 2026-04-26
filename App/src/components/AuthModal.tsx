@@ -45,7 +45,11 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess, initi
                 onSuccess();
                 onClose();
             } else if (view === 'signup') {
-                const { data, error } = await supabase.auth.signUp({ email, password });
+                const { data, error } = await supabase.auth.signUp({
+                    email,
+                    password,
+                    options: { emailRedirectTo: window.location.origin },
+                });
                 if (error) throw error;
 
                 if (data && !data.session) {
@@ -55,7 +59,9 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess, initi
                     onClose();
                 }
             } else if (view === 'reset') {
-                const { error } = await supabase.auth.resetPasswordForEmail(email);
+                const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                    redirectTo: window.location.origin,
+                });
                 if (error) throw error;
                 setMessage('Password reset email sent. Check your inbox.');
             }
