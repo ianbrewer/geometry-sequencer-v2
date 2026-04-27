@@ -10,6 +10,9 @@ import type { SavedColor, SavedGradient, GradientStop } from '../types';
 const PROJECT_THUMBNAIL_PREFIX = '_project-thumbnails';
 const PROJECT_THUMBNAIL_BUCKET = 'v2-user-assets';
 const PROJECT_THUMBNAIL_TTL = 60 * 60 * 24; // 24h signed URL
+// Frame 0 is usually pre-animation / blank. Snapshot 10s in (clamped to duration) so
+// thumbnails reflect a meaningful state of the animation.
+const PROJECT_THUMBNAIL_CAPTURE_TIME = 10;
 
 const SAVED_COLORS_KEY = 'v2-saved-colors';
 const SAVED_GRADIENTS_KEY = 'v2-saved-gradients';
@@ -1103,7 +1106,7 @@ export const useStore = create<AppState>((set, get) => {
 
                 // Snapshot the live canvas to a thumbnail and upload (fire-and-forget;
                 // we don't want save UI to block on this).
-                captureThumbnail(320, 180, updatedProject.backgroundColor || '#000000').then((blob) => {
+                get().captureCurrentProjectThumbnail().then((blob) => {
                     if (blob) get().uploadProjectThumbnail(updatedProject.id, blob);
                 });
             } catch (e) {
@@ -2013,6 +2016,34 @@ export const useStore = create<AppState>((set, get) => {
             }
         },
 
+        captureCurrentProjectThumbnail: async () => {
+            const state = get();
+            const proj = state.project;
+            if (!proj) return null;
+            const duration = Number.isFinite(proj.duration) && proj.duration > 0 ? proj.duration : 0;
+            const targetTime = Math.min(PROJECT_THUMBNAIL_CAPTURE_TIME, duration);
+            const originalTime = state.currentTime;
+            const originalPlaying = state.isPlaying;
+            const needsSeek = originalPlaying || Math.abs(originalTime - targetTime) > 1e-3;
+
+            if (needsSeek) {
+                if (originalPlaying) set({ isPlaying: false });
+                set({ currentTime: targetTime });
+                // Two RAFs: first lets React commit; second lets GeometryPlayer's effect render Pixi.
+                await new Promise<void>((res) =>
+                    requestAnimationFrame(() => requestAnimationFrame(() => res())),
+                );
+            }
+
+            const blob = await captureThumbnail(320, 180, proj.backgroundColor || '#000000');
+
+            if (needsSeek) {
+                set({ currentTime: originalTime, isPlaying: originalPlaying });
+            }
+
+            return blob;
+        },
+
         uploadProjectThumbnail: async (projectId, blob) => {
             const { user } = get();
             if (!user) return;
@@ -2082,8 +2113,7 @@ export const useStore = create<AppState>((set, get) => {
                     await get().loadProject(meta.id, 'dashboard');
                     // Give Pixi time to mount the new project + render a frame.
                     await new Promise((r) => setTimeout(r, 800));
-                    const bg = get().project?.backgroundColor || '#000000';
-                    const blob = await captureThumbnail(320, 180, bg);
+                    const blob = await get().captureCurrentProjectThumbnail();
                     if (blob) {
                         await get().uploadProjectThumbnail(meta.id, blob);
                     }

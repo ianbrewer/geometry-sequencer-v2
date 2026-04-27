@@ -318,6 +318,7 @@ export interface AppState {
     seedDefaultAssetFolders: () => Promise<void>;
 
     // Project thumbnail actions
+    captureCurrentProjectThumbnail: () => Promise<Blob | null>;
     uploadProjectThumbnail: (projectId: string, blob: Blob) => Promise<void>;
     fetchProjectThumbnails: () => Promise<void>;
     regenerateAllProjectThumbnails: (onProgress?: (done: number, total: number) => void) => Promise<void>;

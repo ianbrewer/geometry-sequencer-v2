@@ -3,7 +3,6 @@ import { Save, Menu, ChevronDown, Copy, Trash2, Edit2, Settings, User as UserIco
 import { useStore } from '../store/useStore';
 import AuthModal from './AuthModal';
 import ExportModal from './ExportModal';
-import { captureThumbnail } from '../utils/thumbnailGenerator';
 const TopBar: React.FC = () => {
     const project = useStore(s => s.project);
     const duplicateProject = useStore(s => s.duplicateProject);
@@ -52,7 +51,7 @@ const TopBar: React.FC = () => {
         if (thumbState !== 'idle') return;
         setThumbState('saving');
         try {
-            const blob = await captureThumbnail(320, 180, project.backgroundColor || '#000000');
+            const blob = await useStore.getState().captureCurrentProjectThumbnail();
             if (!blob) {
                 setThumbState('idle');
                 return;
