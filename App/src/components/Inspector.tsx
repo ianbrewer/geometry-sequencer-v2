@@ -1007,88 +1007,51 @@ const Inspector: React.FC = () => {
                             {/* Hide specific Style props for Groups UNLESS override is enabled */}
                             {(activeLayer?.type !== 'group' || activeLayer?.config?.styleOverrideEnabled) && (
                                 <>
-                                    {/* STROKE */}
-                                    <div className="flex flex-col px-1">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <ModernToggle
-                                                    checked={activeLayer?.config?.strokeEnabled}
-                                                    onChange={(val, skip?: boolean) => setConfigValue('strokeEnabled', val, skip)}
-                                                    label="STROKE"
-                                                    className={overridden ? "text-blue-400" : ""}
-                                                />
-                                                {overridden && <div className="text-[8px] text-blue-400 font-bold ml-1">OVERRIDDEN</div>}
-                                            </div>
-                                            {activeLayer?.config?.strokeEnabled && (
-                                                <div className="flex items-center gap-2">
-                                                    <select
-                                                        value={activeLayer?.config?.strokeStyleType === 'dotted' ? 'dashed' : activeLayer?.config?.strokeStyleType}
-                                                        onChange={(e) => setConfigValue('strokeStyleType', e.target.value)}
-                                                        className="bg-[#1A1A1A] text-[9px] text-white p-0.5 rounded border border-white/10 w-16 h-5"
-                                                    >
-                                                        <option value="solid">Solid</option>
-                                                        <option value="dashed">Dashed</option>
-                                                    </select>
-                                                    <CustomColorPicker color={activeLayer?.config?.strokeColor || '#ffffff'} onChange={(color) => setConfigValue('strokeColor', color)} className="w-4 h-4 border border-white/20 cursor-pointer rounded p-0" />
-                                                </div>
-                                            )}
-                                        </div>
-                                        {activeLayer?.config?.strokeEnabled && (
-                                            <div className="mt-2 pl-4 border-l border-white/10 ml-1">
-                                                <ControlSlider
-                                                    label="Weight"
-                                                    value={getAnimValue('strokeWeight') || 1}
-                                                    min={0} max={100} step={0.5}
-                                                    onChange={(v: number, skip?: boolean) => setAnimValue('strokeWeight', v, skip)}
-                                                    disabled={!activeKeyframe}
-                                                    className="mb-0"
-                                                />
-                                            </div>
-                                        )}
-                                    </div>
-                                    {activeLayer?.config?.strokeEnabled && activeLayer?.config?.strokeStyleType !== 'solid' && (
-                                        <div className="space-y-1 px-1 pb-1 border-l-2 border-white/5 ml-1 pl-2">
-                                            <ControlSlider label="Dash" value={activeLayer?.config?.dashLength || 10} min={0.1} max={100} onChange={(v: number, skip?: boolean) => setConfigValue('dashLength', v, skip)} isFixed />
-                                            <ControlSlider label="Gap" value={activeLayer?.config?.gapLength || 10} min={1} max={100} onChange={(v: number, skip?: boolean) => setConfigValue('gapLength', v, skip)} isFixed />
-                                        </div>
-                                    )}
-
-                                    {/* FILL */}
-                                    <div className="flex items-center justify-between px-1 mt-2">
+                                    {/* COLOR — unified flat/gradient selector. Replaces the
+                                        old separate STROKE/FILL/GRADIENT toggles. The single
+                                        color (or gradient) writes to both strokeColor and
+                                        fillColor; primitives are stroke-only by default
+                                        (filledStyle below opts in to fill), SVG assets recolor
+                                        whatever paint regions they have via svgRecolor. */}
+                                    <div className="flex items-center justify-between px-1">
                                         <div className="flex items-center gap-2">
-                                            <ModernToggle
-                                                checked={activeLayer?.config?.fillEnabled}
-                                                onChange={(val, skip?: boolean) => setConfigValue('fillEnabled', val, skip)}
-                                                label="FILL"
-                                                className={overridden ? "text-blue-400" : ""}
-                                            />
+                                            <span className="text-white/90 text-[10px] uppercase">Color</span>
+                                            <div className="inline-flex bg-[#1A1A1A] rounded border border-white/10 p-0.5 gap-0.5">
+                                                <button
+                                                    type="button"
+                                                    className={`text-[8px] uppercase px-1.5 py-[1px] rounded transition-colors ${!activeLayer?.config?.gradientEnabled ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/70'}`}
+                                                    onClick={() => {
+                                                        if (!activeLayer) return;
+                                                        updateLayer(activeLayer.id, { config: { ...activeLayer.config, gradientEnabled: false, strokeEnabled: true } });
+                                                    }}
+                                                >Flat</button>
+                                                <button
+                                                    type="button"
+                                                    className={`text-[8px] uppercase px-1.5 py-[1px] rounded transition-colors ${activeLayer?.config?.gradientEnabled ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/70'}`}
+                                                    onClick={() => {
+                                                        if (!activeLayer) return;
+                                                        const stops = (activeLayer.config.gradientStops?.length)
+                                                            ? activeLayer.config.gradientStops
+                                                            : [
+                                                                { id: '1', offset: 36, color: '#793720' },
+                                                                { id: '2', offset: 63, color: '#FCC698' }
+                                                            ];
+                                                        updateLayer(activeLayer.id, { config: { ...activeLayer.config, gradientEnabled: true, strokeEnabled: true, gradientStops: stops } });
+                                                    }}
+                                                >Gradient</button>
+                                            </div>
                                             {overridden && <div className="text-[8px] text-blue-400 font-bold ml-1">OVERRIDDEN</div>}
                                         </div>
-                                        {activeLayer?.config?.fillEnabled && (
-                                            <CustomColorPicker color={activeLayer?.config?.fillColor === 'transparent' ? '#ffffff' : (activeLayer?.config?.fillColor || '#ffffff')} onChange={(color) => setConfigValue('fillColor', color === 'transparent' ? '#ffffff' : color)} className="w-4 h-4 border border-white/20 cursor-pointer rounded p-0" />
-                                        )}
-                                    </div>
-
-                                    {/* GRADIENT */}
-                                    <div className="flex items-center justify-between px-1 mt-2">
-                                        <div className="flex items-center gap-2">
-                                            <ModernToggle
-                                                checked={activeLayer?.config?.gradientEnabled ?? false}
-                                                onChange={(val) => {
+                                        {!activeLayer?.config?.gradientEnabled ? (
+                                            <CustomColorPicker
+                                                color={activeLayer?.config?.strokeColor || '#ffffff'}
+                                                onChange={(color) => {
                                                     if (!activeLayer) return;
-                                                    const updates: any = { gradientEnabled: val };
-                                                    if (val && (!activeLayer.config.gradientStops || activeLayer.config.gradientStops.length === 0)) {
-                                                        updates.gradientStops = [
-                                                            { id: '1', offset: 36, color: '#793720' },
-                                                            { id: '2', offset: 63, color: '#FCC698' }
-                                                        ];
-                                                    }
-                                                    updateLayer(activeLayer.id, { config: { ...activeLayer.config, ...updates } });
+                                                    updateLayer(activeLayer.id, { config: { ...activeLayer.config, strokeColor: color, fillColor: color, strokeEnabled: true } });
                                                 }}
-                                                label="GRADIENT"
+                                                className="w-4 h-4 border border-white/20 cursor-pointer rounded p-0"
                                             />
-                                        </div>
-                                        {activeLayer?.config?.gradientEnabled && (
+                                        ) : (
                                             <div className="relative">
                                                 <div
                                                     className="w-8 h-4 border border-white/20 cursor-pointer rounded-sm overflow-hidden p-0 hover:border-white/50 transition-colors"
@@ -1112,6 +1075,59 @@ const Inspector: React.FC = () => {
                                                 )}
                                             </div>
                                         )}
+                                    </div>
+
+                                    {/* WEIGHT + dash style. Stroke is always on; this controls
+                                        thickness and whether it's solid or dashed. */}
+                                    <div className="flex flex-col px-1 mt-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-white/90 text-[10px] uppercase">Weight</span>
+                                            <select
+                                                value={activeLayer?.config?.strokeStyleType === 'dotted' ? 'dashed' : (activeLayer?.config?.strokeStyleType || 'solid')}
+                                                onChange={(e) => setConfigValue('strokeStyleType', e.target.value)}
+                                                className="bg-[#1A1A1A] text-[9px] text-white p-0.5 rounded border border-white/10 w-16 h-5"
+                                            >
+                                                <option value="solid">Solid</option>
+                                                <option value="dashed">Dashed</option>
+                                            </select>
+                                        </div>
+                                        <div className="mt-2 pl-4 border-l border-white/10 ml-1">
+                                            <ControlSlider
+                                                label="Weight"
+                                                value={getAnimValue('strokeWeight') || 1}
+                                                min={0} max={100} step={0.5}
+                                                onChange={(v: number, skip?: boolean) => setAnimValue('strokeWeight', v, skip)}
+                                                disabled={!activeKeyframe}
+                                                className="mb-0"
+                                            />
+                                        </div>
+                                    </div>
+                                    {activeLayer?.config?.strokeStyleType !== 'solid' && (
+                                        <div className="space-y-1 px-1 pb-1 border-l-2 border-white/5 ml-1 pl-2">
+                                            <ControlSlider label="Dash" value={activeLayer?.config?.dashLength || 10} min={0.1} max={100} onChange={(v: number, skip?: boolean) => setConfigValue('dashLength', v, skip)} isFixed />
+                                            <ControlSlider label="Gap" value={activeLayer?.config?.gapLength || 10} min={1} max={100} onChange={(v: number, skip?: boolean) => setConfigValue('gapLength', v, skip)} isFixed />
+                                        </div>
+                                    )}
+
+                                    {/* FILLED — opt-in fill on built-in primitives (rare). On
+                                        SVG assets, fill is driven by the SVG's own paint regions
+                                        regardless of this toggle. Always force strokeEnabled=true
+                                        so the layer never becomes invisible if a user toggles
+                                        Filled off on a layer that previously had stroke=off
+                                        (e.g. amino, which type-switches to fill-only). */}
+                                    <div className="flex items-center justify-between px-1 mt-2">
+                                        <div className="flex items-center gap-2">
+                                            <ModernToggle
+                                                checked={activeLayer?.config?.fillEnabled ?? false}
+                                                onChange={(val, skip?: boolean) => {
+                                                    if (!activeLayer) return;
+                                                    updateLayer(activeLayer.id, { config: { ...activeLayer.config, fillEnabled: val, strokeEnabled: true } }, skip);
+                                                }}
+                                                label="FILLED"
+                                                className={overridden ? "text-blue-400" : ""}
+                                            />
+                                            {overridden && <div className="text-[8px] text-blue-400 font-bold ml-1">OVERRIDDEN</div>}
+                                        </div>
                                     </div>
 
                                     {/* DOTS */}

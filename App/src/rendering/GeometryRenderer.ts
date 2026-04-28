@@ -458,13 +458,17 @@ export class GeometryRenderer {
                     const rx = currentRadiusX + i * currentRadiusOffset * level1Progressive;
                     const ry = currentRadiusY + i * currentRadiusOffset * level1Progressive;
 
-                    // Asset-based shapes: render as a Pixi Sprite using the cached Texture.
-                    // Returns an empty Container placeholder while the texture loads (it
-                    // will appear on a subsequent frame — the renderer runs every tick).
+                    // Asset-based shapes: SVG → vector Graphics (preserves compound
+                    // paths + fill-rule knockouts); raster (PNG/JPEG) → Sprite. Returns
+                    // an empty Container placeholder while the asset loads (renderer runs
+                    // every tick, so it'll appear on a subsequent frame).
                     if (layer.type === 'asset_set' || layer.type === 'asset_single') {
                         const wrapper = this.getContainer();
                         const id = resolveAssetId(i);
                         if (!id) return wrapper;
+                        const mime = assetCache.getMimeType(id);
+                        if (!mime) return wrapper; // metadata still loading
+                        const targetMax = Math.max(Math.abs(rx), Math.abs(ry)) * 2; // full extent = diameter
                         const recolorOpts: SvgRecolorOptions = {
                             fillEnabled: effectiveConfig.fillEnabled,
                             fillColor: effectiveConfig.fillColor,
@@ -474,29 +478,44 @@ export class GeometryRenderer {
                             gradientStops: effectiveConfig.gradientStops,
                         };
                         const colorKey = buildColorKey(recolorOpts);
-                        // For SVGs, the recolored variant is rasterized from rewritten source.
-                        // For rasters, ColorOverlayFilter replaces RGB with fillColor while
-                        // preserving the source alpha — gives a true silhouette recolor
-                        // regardless of the PNG's original color (tint would only multiply).
-                        const useVariant = colorKey && assetCache.isSvg(id);
-                        const texture = useVariant
-                            ? assetCache.getTextureSync(id, colorKey, recolorOpts)
-                            : assetCache.getTextureSync(id);
-                        if (!texture) return wrapper; // loading; retry next frame
+
+                        if (mime === 'image/svg+xml') {
+                            // Vector path — recolor (if any) is applied by rewriting paint
+                            // attributes in the SVG source before parsing into a context.
+                            const ctx = colorKey
+                                ? assetCache.getGraphicsContextSync(id, colorKey, recolorOpts)
+                                : assetCache.getGraphicsContextSync(id);
+                            if (!ctx) return wrapper; // source still fetching
+                            const graphics = new Graphics(ctx);
+                            const bounds = graphics.getLocalBounds();
+                            const w = bounds.width;
+                            const h = bounds.height;
+                            if (w > 0 && h > 0) {
+                                graphics.pivot.set(bounds.x + w / 2, bounds.y + h / 2);
+                                if (targetMax > 0) {
+                                    graphics.scale.set(targetMax / Math.max(w, h));
+                                }
+                            }
+                            graphics.rotation = currentRotateShape * (Math.PI / 180);
+                            wrapper.addChild(graphics);
+                            return wrapper;
+                        }
+
+                        // Raster path — ColorOverlayFilter replaces RGB with fillColor
+                        // while preserving alpha, giving a true silhouette recolor
+                        // regardless of the source's original colors.
+                        const texture = assetCache.getTextureSync(id);
+                        if (!texture) return wrapper;
                         const sprite = new Sprite(texture);
                         sprite.anchor.set(0.5);
-                        if (!useVariant && effectiveConfig.fillEnabled && effectiveConfig.fillColor) {
+                        if (effectiveConfig.fillEnabled && effectiveConfig.fillColor) {
                             const colorNum = new Color(effectiveConfig.fillColor).toNumber();
                             sprite.filters = [new ColorOverlayFilter({ color: colorNum, alpha: 1 })];
                         }
-                        // Respect original aspect ratio — fit the sprite's bounding box inside
-                        // the layer's radius while preserving the texture's width:height ratio.
                         const texW = texture.width || 1;
                         const texH = texture.height || 1;
-                        const targetMax = Math.max(Math.abs(rx), Math.abs(ry)) * 2; // full extent = diameter
                         if (targetMax > 0) {
-                            const scale = targetMax / Math.max(texW, texH);
-                            sprite.scale.set(scale);
+                            sprite.scale.set(targetMax / Math.max(texW, texH));
                         }
                         sprite.rotation = currentRotateShape * (Math.PI / 180);
                         wrapper.addChild(sprite);

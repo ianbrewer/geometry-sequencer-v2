@@ -20,9 +20,24 @@ export async function optimizeAsset(file: File): Promise<File> {
 async function optimizeSvg(file: File): Promise<File> {
     const originalText = await file.text();
     const { optimize } = await import('svgo/browser');
-    // Default config applies preset-default, which in svgo v3+ keeps viewBox intact —
-    // important because the renderer reads viewBox for sizing.
-    const result = optimize(originalText, { multipass: true });
+    // mergePaths + convertShapeToPath both flatten compound subpaths in ways
+    // that drop fill-rule="evenodd" knockouts when we render the result via
+    // Pixi's GraphicsContext. Disable them so vector rendering preserves the
+    // designer's holes/cutouts. preset-default still applies all the safer
+    // size-saving plugins.
+    const result = optimize(originalText, {
+        multipass: true,
+        plugins: [{
+            name: 'preset-default',
+            params: {
+                overrides: {
+                    mergePaths: false,
+                    convertShapeToPath: false,
+                    removeViewBox: false,
+                },
+            },
+        }],
+    });
     if (!('data' in result) || typeof result.data !== 'string') return file;
     if (result.data.length >= originalText.length) return file;
     return new File([result.data], file.name, { type: 'image/svg+xml', lastModified: file.lastModified });

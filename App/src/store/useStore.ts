@@ -89,7 +89,7 @@ const createDefaultLayer = (index: number, projectContext?: Pick<Project, 'globa
     const layerId = `layer-${Math.random().toString(36).substr(2, 9)}`;
     const strokeColor = (projectContext?.globalStyleEnabled && projectContext?.globalLineColor)
         ? projectContext.globalLineColor
-        : '#7a7a7a';
+        : '#ffffff';
     const strokeWeight = (projectContext?.globalStyleEnabled && projectContext?.globalStrokeWeight !== undefined)
         ? projectContext.globalStrokeWeight
         : 1;
@@ -135,7 +135,9 @@ const createDefaultLayer = (index: number, projectContext?: Pick<Project, 'globa
             gridLayout2: '',
             strokeColor: strokeColor,
             strokeEnabled: true,
-            fillColor: '#ffffff',
+            // Color is unified in the Inspector — fillColor stays in lockstep with
+            // strokeColor so both render the same paint when filledStyle is on.
+            fillColor: strokeColor,
             fillEnabled: false,
             scaleLocked: true,
             dotsEnabled: false,

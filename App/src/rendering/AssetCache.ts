@@ -1,4 +1,4 @@
-import { Assets, Texture } from 'pixi.js';
+import { Assets, GraphicsContext, Texture } from 'pixi.js';
 import { recolorSvg, type SvgRecolorOptions } from '../utils/svgRecolor';
 
 type LoadInfo = { url: string; mimeType: string };
@@ -6,16 +6,18 @@ type UrlProvider = (assetId: string) => Promise<LoadInfo | null>;
 export type AssetEntry = { id: string; mimeType: string };
 type FolderAssetsProvider = (folderId: string | null) => AssetEntry[];
 
-// Rasterization factor for SVGs. Pixi v8 otherwise rasterizes SVGs at their
-// natural (viewBox) size, which pixelates when the sprite is scaled up.
-// 4x yields ~480px textures for our 120px seed viewBoxes — crisp at typical
-// on-screen sizes and light enough to batch smoothly across many instances.
-const SVG_RASTER_RESOLUTION = 4;
-
 class AssetCacheImpl {
+    // Raster (PNG/JPEG) sprites only. SVGs render through `contexts` instead so
+    // fill-rule knockouts and compound paths survive — rasterizing via Pixi's
+    // SVG-to-canvas path drops those semantics on complex artwork.
     private textures = new Map<string, Texture>();
-    private inflight = new Map<string, Promise<Texture | null>>();
+    // Pixi v8 GraphicsContext per (assetId[, colorKey]) — shared across every
+    // Graphics instance the renderer creates for that asset/variant, so 100
+    // copies of the same icon batch as one draw call.
+    private contexts = new Map<string, GraphicsContext>();
     private svgSources = new Map<string, string>();
+    private mimeTypes = new Map<string, string>();
+    private inflightMeta = new Map<string, Promise<void>>();
     private urlProvider: UrlProvider | null = null;
     private folderAssetsProvider: FolderAssetsProvider | null = null;
 
@@ -31,48 +33,63 @@ class AssetCacheImpl {
         return this.folderAssetsProvider ? this.folderAssetsProvider(folderId) : [];
     }
 
-    // Synchronous — returns the cached Texture or null. Kicks off a load if not yet started.
-    // Callers are expected to run every frame, so `null` on the first hit becomes the real
-    // Texture on a subsequent frame.
-    //
-    // If `colorKey` is a non-empty string, returns a recolored variant of the asset (SVG only).
-    // The variant is rasterized lazily on first request and cached under `${assetId}|${colorKey}`.
-    getTextureSync(assetId: string, colorKey?: string, recolorOpts?: SvgRecolorOptions): Texture | null {
-        const key = colorKey ? `${assetId}|${colorKey}` : assetId;
-        const cached = this.textures.get(key);
-        if (cached) return cached;
-        if (!this.inflight.has(key) && this.urlProvider) {
-            if (colorKey && recolorOpts) {
-                // Variant requires the base SVG source. If we don't have it yet, ensure
-                // the base load kicks off; the variant will be requested again next frame.
-                if (!this.svgSources.has(assetId)) {
-                    if (!this.inflight.has(assetId)) {
-                        this.inflight.set(assetId, this.load(assetId));
-                    }
-                    return null;
-                }
-                this.inflight.set(key, this.loadVariant(assetId, key, recolorOpts));
-            } else {
-                this.inflight.set(key, this.load(assetId));
-            }
-        }
-        return null;
+    // Mime type once the asset's metadata has been fetched. Returns null while
+    // loading — caller should retry next frame (renderer runs every tick).
+    getMimeType(assetId: string): string | null {
+        this.ensureMeta(assetId);
+        return this.mimeTypes.get(assetId) ?? null;
     }
 
-    private async load(assetId: string): Promise<Texture | null> {
-        if (!this.urlProvider) return null;
+    isSvg(assetId: string): boolean {
+        return this.mimeTypes.get(assetId) === 'image/svg+xml';
+    }
+
+    // Raster path: cached Texture for PNG/JPEG assets. Returns null while
+    // loading. SVGs do NOT populate this map — use getGraphicsContextSync.
+    getTextureSync(assetId: string): Texture | null {
+        this.ensureMeta(assetId);
+        return this.textures.get(assetId) ?? null;
+    }
+
+    // Vector path for SVGs. Returns the cached GraphicsContext or builds one
+    // synchronously from the cached SVG source. `colorKey`+`recolorOpts` selects
+    // a recolored variant (rewrites paint attrs via svgRecolor before parsing).
+    // Returns null while the underlying SVG source is still being fetched.
+    getGraphicsContextSync(assetId: string, colorKey?: string, recolorOpts?: SvgRecolorOptions): GraphicsContext | null {
+        this.ensureMeta(assetId);
+        const key = colorKey ? `${assetId}|${colorKey}` : assetId;
+        const cached = this.contexts.get(key);
+        if (cached) return cached;
+        const source = this.svgSources.get(assetId);
+        if (!source) return null;
+        const svgText = (colorKey && recolorOpts) ? recolorSvg(source, recolorOpts) : source;
         try {
-            const info = await this.urlProvider(assetId);
-            if (!info) return null;
-            let tex: Texture;
+            const ctx = new GraphicsContext();
+            ctx.svg(svgText);
+            this.contexts.set(key, ctx);
+            return ctx;
+        } catch (e) {
+            console.error('AssetCache SVG parse failed', assetId, e);
+            return null;
+        }
+    }
+
+    private ensureMeta(assetId: string) {
+        if (this.mimeTypes.has(assetId) || this.inflightMeta.has(assetId)) return;
+        if (!this.urlProvider) return;
+        this.inflightMeta.set(assetId, this.loadMeta(assetId));
+    }
+
+    private async loadMeta(assetId: string): Promise<void> {
+        try {
+            const info = await this.urlProvider!(assetId);
+            if (!info) return;
+            this.mimeTypes.set(assetId, info.mimeType);
             if (info.mimeType === 'image/svg+xml') {
                 const resp = await fetch(info.url);
-                const text = await resp.text();
-                this.svgSources.set(assetId, text);
-                const dataUrl = svgToDataUrl(text);
-                tex = await Assets.load<Texture>({ src: dataUrl, data: { resolution: SVG_RASTER_RESOLUTION } });
+                this.svgSources.set(assetId, await resp.text());
             } else {
-                tex = await Assets.load<Texture>(info.url);
+                const tex = await Assets.load<Texture>(info.url);
                 // Raster sources (e.g. 500×500 PNGs) get heavily minified for small
                 // sprites. Mipmaps kill the aliasing; anisotropy keeps them sharp
                 // (plain trilinear blurs too much at typical icon sizes).
@@ -80,38 +97,13 @@ class AssetCacheImpl {
                 tex.source.style.scaleMode = 'linear';
                 tex.source.style.maxAnisotropy = 16;
                 tex.source.updateMipmaps();
+                this.textures.set(assetId, tex);
             }
-            this.textures.set(assetId, tex);
-            return tex;
         } catch (e) {
-            console.error('AssetCache load failed', assetId, e);
-            return null;
+            console.error('AssetCache loadMeta failed', assetId, e);
         } finally {
-            this.inflight.delete(assetId);
+            this.inflightMeta.delete(assetId);
         }
-    }
-
-    private async loadVariant(assetId: string, key: string, opts: SvgRecolorOptions): Promise<Texture | null> {
-        try {
-            const source = this.svgSources.get(assetId);
-            if (!source) return null;
-            const recolored = recolorSvg(source, opts);
-            const dataUrl = svgToDataUrl(recolored);
-            const tex = await Assets.load<Texture>({ src: dataUrl, data: { resolution: SVG_RASTER_RESOLUTION } });
-            this.textures.set(key, tex);
-            return tex;
-        } catch (e) {
-            console.error('AssetCache variant load failed', key, e);
-            return null;
-        } finally {
-            this.inflight.delete(key);
-        }
-    }
-
-    // Returns true if the asset is an SVG (variants supported). False for rasters
-    // or assets not yet loaded — caller should fall back to base texture + tint.
-    isSvg(assetId: string): boolean {
-        return this.svgSources.has(assetId);
     }
 
     invalidate(assetId: string) {
@@ -121,19 +113,25 @@ class AssetCacheImpl {
                 this.textures.delete(key);
             }
         }
+        for (const [key, ctx] of this.contexts) {
+            if (key === assetId || key.startsWith(`${assetId}|`)) {
+                ctx.destroy();
+                this.contexts.delete(key);
+            }
+        }
         this.svgSources.delete(assetId);
+        this.mimeTypes.delete(assetId);
     }
 
     clear() {
         for (const tex of this.textures.values()) tex.destroy(true);
         this.textures.clear();
-        this.inflight.clear();
+        for (const ctx of this.contexts.values()) ctx.destroy();
+        this.contexts.clear();
+        this.inflightMeta.clear();
         this.svgSources.clear();
+        this.mimeTypes.clear();
     }
-}
-
-function svgToDataUrl(svgText: string): string {
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
 }
 
 export const assetCache = new AssetCacheImpl();

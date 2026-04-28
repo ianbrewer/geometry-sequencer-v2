@@ -88,11 +88,15 @@ export function recolorSvg(svgText: string, opts: SvgRecolorOptions): string {
     // fill/stroke is enabled, we extend that paint to both. Users who want
     // separate fill and stroke colors enable both toggles explicitly. Gradient,
     // when on, also covers strokes unless a stroke color was set separately.
+    // In gradient mode the gradient applies to BOTH fills and strokes — the
+    // user-facing model is "one color (or gradient) paints whatever the shape
+    // already paints". Without this, stroke-only icons render in the flat
+    // strokeColor while gradient mode is "on" and the gradient never appears.
     const gradientPaint = opts.gradientEnabled ? `url(#${GRADIENT_ID})` : null;
     const rawFill = opts.fillEnabled ? (opts.fillColor ?? null) : null;
     const rawStroke = opts.strokeEnabled ? (opts.strokeColor ?? null) : null;
     const fillPaint = gradientPaint ?? rawFill ?? rawStroke;
-    const strokePaint = rawStroke ?? rawFill ?? gradientPaint;
+    const strokePaint = gradientPaint ?? rawStroke ?? rawFill;
 
     // Rewrite <style> blocks in place — preserves `fill: none` on background
     // classes while replacing real colors with our paint. CSS beats presentation
@@ -115,20 +119,34 @@ export function recolorSvg(svgText: string, opts: SvgRecolorOptions): string {
         grad.setAttribute('y2', '0');
         for (const stop of opts.gradientStops ?? []) {
             const s = doc.createElementNS(ns, 'stop');
-            s.setAttribute('offset', `${stop.offset}%`);
+            // Pixi v8's SVG parser uses Number(value) for stop offsets and rejects
+            // the "36%" form (yields NaN, which then makes canvas addColorStop throw
+            // and the gradient texture build silently fails — paths render invisible).
+            // Stops are stored as 0–100 in the editor; emit them as 0–1 decimals.
+            const offset = Math.max(0, Math.min(1, (stop.offset ?? 0) / 100));
+            s.setAttribute('offset', String(offset));
             s.setAttribute('stop-color', stop.color);
             grad.appendChild(s);
         }
         defs.appendChild(grad);
     }
 
-    const walk = (el: Element) => {
+    // Walk with inherited paint so we only recolor regions that already had
+    // paint. SVG default fill is `black` (so unset = visible fill, do recolor);
+    // SVG default stroke is `none` (so unset = invisible, DON'T add a stroke).
+    // Without this, a stroke-only icon picks up our fill paint on every node
+    // and an icon without strokes picks up our stroke paint everywhere — both
+    // visible to users as "weird fills" / accidental outlines.
+    const walk = (el: Element, inheritedFill: string, inheritedStroke: string) => {
+        const ownFill = currentPaint(el, 'fill');
+        const ownStroke = currentPaint(el, 'stroke');
+        const resolvedFill = ownFill ?? inheritedFill;
+        const resolvedStroke = ownStroke ?? inheritedStroke;
+
         const tag = el.nodeName.toLowerCase();
         if (PAINTABLE_TAGS.has(tag)) {
-            const existingFill = currentPaint(el, 'fill');
-            const existingStroke = currentPaint(el, 'stroke');
-            const applyFill = fillPaint !== null && existingFill !== 'none';
-            const applyStroke = strokePaint !== null && existingStroke !== 'none';
+            const applyFill = fillPaint !== null && resolvedFill !== 'none';
+            const applyStroke = strokePaint !== null && resolvedStroke !== 'none';
             if (applyFill) el.setAttribute('fill', fillPaint!);
             if (applyStroke) el.setAttribute('stroke', strokePaint!);
             const inline = el.getAttribute('style');
@@ -139,9 +157,9 @@ export function recolorSvg(svgText: string, opts: SvgRecolorOptions): string {
                 if (rewritten !== inline) el.setAttribute('style', rewritten);
             }
         }
-        for (const child of Array.from(el.children)) walk(child);
+        for (const child of Array.from(el.children)) walk(child, resolvedFill, resolvedStroke);
     };
-    walk(svg);
+    walk(svg, 'black', 'none');
 
     return new XMLSerializer().serializeToString(doc);
 }
