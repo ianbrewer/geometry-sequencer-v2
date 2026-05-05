@@ -2018,7 +2018,7 @@ export const useStore = create<AppState>((set, get) => {
             }
         },
 
-        captureCurrentProjectThumbnail: async (captureTimeOverride?: number) => {
+        captureCurrentProjectThumbnail: async (captureTimeOverride?: number | 'end') => {
             const state = get();
             const proj = state.project;
             if (!proj) return null;

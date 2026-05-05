@@ -14,7 +14,7 @@
 //   - Some exotic path actions (roundShape/filletRect/chamferRect) are
 //     approximated as their non-rounded equivalents.
 
-import type { Application, Container, Graphics, Sprite } from 'pixi.js';
+import type { Application, Container, Graphics } from 'pixi.js';
 import type { Project } from '../types';
 
 type AnyNode = Container & {
@@ -226,61 +226,6 @@ function emitGraphics(g: Graphics & AnyNode, alpha: number, ctx: SVGCtx) {
     } catch {
         // Bounds unavailable — fall back to canvas-sized viewBox at the end.
     }
-}
-
-function emitSprite(s: Sprite & AnyNode, alpha: number, ctx: SVGCtx) {
-    const m = s.worldTransform;
-    const transform = `matrix(${m.a} ${m.b} ${m.c} ${m.d} ${m.tx} ${m.ty})`;
-
-    const tex = (s as any).texture;
-    const source = tex?.source?.resource ?? tex?.source?._resource;
-    let href: string | null = null;
-    let sw = tex?.frame?.width ?? tex?.width ?? s.width;
-    let sh = tex?.frame?.height ?? tex?.height ?? s.height;
-
-    try {
-        if (source instanceof HTMLImageElement) {
-            href = imageToDataURL(source, sw, sh);
-        } else if (source instanceof HTMLCanvasElement) {
-            href = source.toDataURL('image/png');
-        } else if (source instanceof ImageBitmap) {
-            const c = document.createElement('canvas');
-            c.width = source.width;
-            c.height = source.height;
-            c.getContext('2d')!.drawImage(source, 0, 0);
-            href = c.toDataURL('image/png');
-            sw = source.width;
-            sh = source.height;
-        }
-    } catch (e) {
-        ctx.warnings.add('Sprite source could not be embedded: ' + (e as Error).message);
-    }
-
-    if (!href) {
-        ctx.warnings.add('Sprite skipped: unsupported texture source');
-        return;
-    }
-
-    // Apply anchor: Pixi sprite local origin is anchor*size; SVG <image> origin
-    // is top-left, so shift by -anchor*size in local coords.
-    const ax = (s as any).anchor?.x ?? 0;
-    const ay = (s as any).anchor?.y ?? 0;
-    const ox = -ax * sw;
-    const oy = -ay * sh;
-
-    ctx.parts.push(
-        `<g transform="${transform}" opacity="${alpha}">` +
-        `<image x="${ox}" y="${oy}" width="${sw}" height="${sh}" href="${href}" preserveAspectRatio="none"/>` +
-        `</g>`,
-    );
-}
-
-function imageToDataURL(img: HTMLImageElement, w: number, h: number): string {
-    const c = document.createElement('canvas');
-    c.width = w || img.naturalWidth;
-    c.height = h || img.naturalHeight;
-    c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
-    return c.toDataURL('image/png');
 }
 
 // --- Style conversion ---------------------------------------------------

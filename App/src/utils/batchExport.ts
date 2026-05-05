@@ -208,8 +208,11 @@ ${hasAssets ? '    <script src="../assets-registry.js"></script>\n' : ''}\
 function renderGalleryHtml(folderName: string, projects: Project[], slugs: string[]): string {
     const tiles = projects.map((p, i) => {
         const slug = slugs[i];
-        const thumb = p.thumbnailData
-            ? `<img src="${p.thumbnailData}" alt="">`
+        // BatchExportModal stamps thumbnailData onto the loaded Project at
+        // load time even though it isn't on the Project type — read defensively.
+        const thumbData = (p as Project & { thumbnailData?: string }).thumbnailData;
+        const thumb = thumbData
+            ? `<img src="${thumbData}" alt="">`
             : `<div class="thumb-fallback" style="background:${p.backgroundColor || '#111'}"></div>`;
         return `        <a class="tile" href="${slug}/index.html">
             ${thumb}
