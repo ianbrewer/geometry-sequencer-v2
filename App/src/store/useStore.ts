@@ -2018,12 +2018,20 @@ export const useStore = create<AppState>((set, get) => {
             }
         },
 
-        captureCurrentProjectThumbnail: async () => {
+        captureCurrentProjectThumbnail: async (captureTimeOverride?: number) => {
             const state = get();
             const proj = state.project;
             if (!proj) return null;
             const duration = Number.isFinite(proj.duration) && proj.duration > 0 ? proj.duration : 0;
-            const targetTime = Math.min(PROJECT_THUMBNAIL_CAPTURE_TIME, duration);
+            let requested: number;
+            if (captureTimeOverride === 'end') {
+                requested = duration;
+            } else if (typeof captureTimeOverride === 'number' && Number.isFinite(captureTimeOverride) && captureTimeOverride >= 0) {
+                requested = captureTimeOverride;
+            } else {
+                requested = PROJECT_THUMBNAIL_CAPTURE_TIME;
+            }
+            const targetTime = Math.min(requested, duration);
             const originalTime = state.currentTime;
             const originalPlaying = state.isPlaying;
             const needsSeek = originalPlaying || Math.abs(originalTime - targetTime) > 1e-3;
@@ -2104,18 +2112,22 @@ export const useStore = create<AppState>((set, get) => {
             saveJsonArray(SAVED_GRADIENTS_KEY, next);
         },
 
-        regenerateAllProjectThumbnails: async (onProgress) => {
+        regenerateProjectThumbnails: async (options) => {
             const { savedProjects, project: original } = get();
             const originalId = original?.id;
+            const { projectIds, captureTime, onProgress } = options || {};
+            const targets = projectIds && projectIds.length
+                ? savedProjects.filter((p) => projectIds.includes(p.id))
+                : savedProjects;
 
-            for (let i = 0; i < savedProjects.length; i++) {
-                const meta = savedProjects[i];
-                onProgress?.(i, savedProjects.length);
+            for (let i = 0; i < targets.length; i++) {
+                const meta = targets[i];
+                onProgress?.(i, targets.length);
                 try {
                     await get().loadProject(meta.id, 'dashboard');
                     // Give Pixi time to mount the new project + render a frame.
                     await new Promise((r) => setTimeout(r, 800));
-                    const blob = await get().captureCurrentProjectThumbnail();
+                    const blob = await get().captureCurrentProjectThumbnail(captureTime);
                     if (blob) {
                         await get().uploadProjectThumbnail(meta.id, blob);
                     }
@@ -2132,7 +2144,7 @@ export const useStore = create<AppState>((set, get) => {
                     // Best effort; if it fails the user can just click a project.
                 }
             }
-            onProgress?.(savedProjects.length, savedProjects.length);
+            onProgress?.(targets.length, targets.length);
         },
 
         fetchProjectThumbnails: async () => {

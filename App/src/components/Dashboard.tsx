@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore';
 import { formatDistanceToNow } from 'date-fns';
 import GeometryCanvas from './GeometryCanvas';
 import ExportModal from './ExportModal';
+import BatchExportModal from './BatchExportModal';
 import AssetLibrary from './AssetLibrary';
 import {
     DndContext,
@@ -340,7 +341,7 @@ const ProjectCard = ({ project }: { project: any }) => {
     );
 };
 
-const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOver = false, startRenaming = false, onRenameComplete, onDeleteClick, viewMode = 'list' }: {
+const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOver = false, startRenaming = false, onRenameComplete, onDeleteClick, viewMode = 'list', onRegenerateThumbnails, regenDisabled = false, onExportClick }: {
     folder: any,
     projects: any[],
     overInfo?: { id: string, position: 'before' | 'after' } | null,
@@ -349,6 +350,9 @@ const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOv
     onRenameComplete?: () => void,
     onDeleteClick?: (folder: any, projectCount: number) => void,
     viewMode?: 'list' | 'grid',
+    onRegenerateThumbnails?: (projectIds: string[], captureTime: number | 'end') => void,
+    regenDisabled?: boolean,
+    onExportClick?: (folder: any, projects: any[]) => void,
 }) => {
     const { setNodeRef, isOver, attributes, listeners, transform, transition, isDragging } = useSortable({
         id: folder.id,
@@ -359,6 +363,9 @@ const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOv
     const deleteFolder = useStore(s => s.deleteFolder);
     const [isRenaming, setIsRenaming] = useState(startRenaming);
     const [newName, setNewName] = useState(folder.name);
+    const [isRegenOpen, setIsRegenOpen] = useState(false);
+    const [regenMode, setRegenMode] = useState<'first' | 'time' | 'last'>('time');
+    const [regenSecond, setRegenSecond] = useState<string>('10');
 
     React.useEffect(() => {
         if (startRenaming) {
@@ -448,6 +455,31 @@ const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOv
                     </div>
 
                     <div className="opacity-0 group-hover:opacity-100 flex gap-1 items-center">
+                        {onExportClick && projects.length > 0 && (
+                            <button
+                                className="p-1 hover:text-[#D4AF37] text-white/30"
+                                title="Export every project in this folder"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onExportClick(folder, projects);
+                                }}
+                            >
+                                <Share2 size={12} />
+                            </button>
+                        )}
+                        {onRegenerateThumbnails && projects.length > 0 && (
+                            <button
+                                className="p-1 hover:text-[#D4AF37] text-white/30 disabled:opacity-30 disabled:cursor-wait"
+                                disabled={regenDisabled}
+                                title="Render thumbnails for projects in this folder"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setIsRegenOpen((v) => !v);
+                                }}
+                            >
+                                <RefreshCw size={12} />
+                            </button>
+                        )}
                         <button className="p-1 hover:text-white text-white/30" onClick={handleStartRenaming}><Edit2 size={12} /></button>
                         <button className="p-1 hover:text-red-500 text-white/30" onClick={(e) => {
                             e.stopPropagation();
@@ -460,6 +492,64 @@ const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOv
 
                     </div>
                 </div>
+
+                {isRegenOpen && onRegenerateThumbnails && (
+                    <div
+                        className="mx-2 mb-2 mt-1 p-2 rounded bg-[#1a1a1a] border border-white/10 flex items-center gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                    >
+                        <span className="text-[10px] uppercase tracking-widest text-white/50">Capture</span>
+                        <select
+                            value={regenMode}
+                            onChange={(e) => setRegenMode(e.target.value as 'first' | 'time' | 'last')}
+                            className="bg-[#0f0f0f] border border-white/10 rounded px-1.5 py-1 text-xs text-white outline-none focus:border-[#D4AF37]"
+                        >
+                            <option value="first">First frame</option>
+                            <option value="time">At time…</option>
+                            <option value="last">Last frame</option>
+                        </select>
+                        {regenMode === 'time' && (
+                            <>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    step={0.1}
+                                    value={regenSecond}
+                                    onChange={(e) => setRegenSecond(e.target.value)}
+                                    className="w-16 bg-[#0f0f0f] border border-white/10 rounded px-1.5 py-1 text-xs text-white outline-none focus:border-[#D4AF37]"
+                                />
+                                <span className="text-[10px] text-white/50">sec</span>
+                            </>
+                        )}
+                        <button
+                            disabled={regenDisabled}
+                            onClick={() => {
+                                let captureTime: number | 'end';
+                                if (regenMode === 'first') {
+                                    captureTime = 0;
+                                } else if (regenMode === 'last') {
+                                    captureTime = 'end';
+                                } else {
+                                    const seconds = parseFloat(regenSecond);
+                                    if (!Number.isFinite(seconds) || seconds < 0) return;
+                                    captureTime = seconds;
+                                }
+                                onRegenerateThumbnails(projects.map(p => p.id), captureTime);
+                                setIsRegenOpen(false);
+                            }}
+                            className="ml-auto px-2 py-1 text-[10px] font-bold uppercase tracking-widest rounded bg-[#D4AF37] text-black hover:bg-[#E5C158] disabled:opacity-30 disabled:cursor-wait"
+                        >
+                            Render
+                        </button>
+                        <button
+                            onClick={() => setIsRegenOpen(false)}
+                            className="px-2 py-1 text-[10px] uppercase tracking-widest text-white/50 hover:text-white"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                )}
 
                 {folder.isOpen && (
                     <div className="pt-0.5 pb-1 min-h-[4px]">
@@ -529,6 +619,7 @@ const Dashboard: React.FC = () => {
     const [activeId, setActiveId] = useState<string | null>(null);
     const [overInfo, setOverInfo] = useState<{ id: string, position: 'before' | 'after' } | null>(null);
     const [showExportModal, setShowExportModal] = useState(false);
+    const [batchExportTarget, setBatchExportTarget] = useState<{ folder: any, projects: any[] } | null>(null);
     const [newlyCreatedFolderId, setNewlyCreatedFolderId] = useState<string | null>(null);
     const [folderToDelete, setFolderToDelete] = useState<{ id: string, name: string, projectCount: number } | null>(null);
     const [sidebarTab, setSidebarTab] = useState<'projects' | 'assets'>('projects');
@@ -579,6 +670,25 @@ const Dashboard: React.FC = () => {
     React.useEffect(() => {
         fetchProjects();
     }, [fetchProjects]);
+
+    const handleRegenerateFolderThumbnails = React.useCallback(
+        (projectIds: string[], captureTime: number | 'end') => {
+            if (thumbRegenProgress !== null || projectIds.length === 0) return;
+            setThumbRegenProgress({ done: 0, total: projectIds.length });
+            (async () => {
+                try {
+                    await useStore.getState().regenerateProjectThumbnails({
+                        projectIds,
+                        captureTime,
+                        onProgress: (done, total) => setThumbRegenProgress({ done, total }),
+                    });
+                } finally {
+                    setThumbRegenProgress(null);
+                }
+            })();
+        },
+        [thumbRegenProgress],
+    );
 
     // Derived State
     const rootProjects = useMemo(() => savedProjects.filter(p => !p.folderId && !p.name.toLowerCase().includes('demo')).sort((a, b) => (b.order || 0) - (a.order || 0)), [savedProjects]);
@@ -729,25 +839,6 @@ const Dashboard: React.FC = () => {
                                             </button>
                                         )}
                                         <button
-                                            disabled={thumbRegenProgress !== null}
-                                            onClick={async () => {
-                                                setIsUserMenuOpen(false);
-                                                setThumbRegenProgress({ done: 0, total: savedProjects.length });
-                                                try {
-                                                    await useStore.getState().regenerateAllProjectThumbnails(
-                                                        (done, total) => setThumbRegenProgress({ done, total })
-                                                    );
-                                                } finally {
-                                                    setThumbRegenProgress(null);
-                                                }
-                                            }}
-                                            className="w-full flex items-center gap-3 px-4 py-2 text-[10px] uppercase tracking-widest text-white/70 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-wait"
-                                        >
-                                            <RefreshCw size={12} className="text-[#D4AF37]" />
-                                            Regenerate Thumbnails
-                                        </button>
-                                        <div className="h-px bg-white/5 my-1" />
-                                        <button
                                             onClick={async () => {
                                                 await useStore.getState().signOut();
                                                 useStore.getState().setView('landing');
@@ -877,6 +968,9 @@ const Dashboard: React.FC = () => {
                                                     }
                                                 }}
                                                 onDeleteClick={(folderData, count) => setFolderToDelete({ id: folderData.id, name: folderData.name, projectCount: count })}
+                                                onRegenerateThumbnails={handleRegenerateFolderThumbnails}
+                                                regenDisabled={thumbRegenProgress !== null}
+                                                onExportClick={(f, ps) => setBatchExportTarget({ folder: f, projects: ps })}
                                             />
                                         ))}
                                         {rootProjects.length > 0 && (
@@ -916,6 +1010,9 @@ const Dashboard: React.FC = () => {
                                                 }
                                             }}
                                             onDeleteClick={(folderData, count) => setFolderToDelete({ id: folderData.id, name: folderData.name, projectCount: count })}
+                                            onRegenerateThumbnails={handleRegenerateFolderThumbnails}
+                                            regenDisabled={thumbRegenProgress !== null}
+                                            onExportClick={(f, ps) => setBatchExportTarget({ folder: f, projects: ps })}
                                         />
                                     ))}
                                     {/* Root Projects */}
@@ -1000,6 +1097,14 @@ const Dashboard: React.FC = () => {
                     {showExportModal && (
                         <ExportModal
                             onClose={() => setShowExportModal(false)}
+                        />
+                    )}
+
+                    {batchExportTarget && (
+                        <BatchExportModal
+                            folder={batchExportTarget.folder}
+                            projects={batchExportTarget.projects}
+                            onClose={() => setBatchExportTarget(null)}
                         />
                     )}
 

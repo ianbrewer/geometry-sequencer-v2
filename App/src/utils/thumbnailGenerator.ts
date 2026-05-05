@@ -6,6 +6,10 @@ export function setPixiAppProvider(p: (() => Application | null) | null) {
     appProvider = p;
 }
 
+export function getPixiApp(): Application | null {
+    return appProvider?.() ?? null;
+}
+
 export async function captureThumbnail(
     width = 320,
     height = 180,

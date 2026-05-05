@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Save, Menu, ChevronDown, Copy, Trash2, Edit2, Settings, User as UserIcon, LogOut, Share2, Link2, Camera } from 'lucide-react';
+import { Save, Menu, ChevronDown, Copy, Trash2, Edit2, Settings, User as UserIcon, LogOut, Share2, Link2, Camera, FileCode } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import AuthModal from './AuthModal';
 import ExportModal from './ExportModal';
+import { exportStageToSVG, downloadSVG } from '../utils/svgExport';
 const TopBar: React.FC = () => {
     const project = useStore(s => s.project);
     const duplicateProject = useStore(s => s.duplicateProject);
@@ -22,6 +23,7 @@ const TopBar: React.FC = () => {
     const [tempName, setTempName] = useState(project.name);
     const [linkCopied, setLinkCopied] = useState(false);
     const [thumbState, setThumbState] = useState<'idle' | 'saving' | 'saved'>('idle');
+    const [svgState, setSvgState] = useState<'idle' | 'exporting' | 'done'>('idle');
     const menuRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -62,6 +64,29 @@ const TopBar: React.FC = () => {
         } catch (e) {
             console.warn('Set thumbnail failed', e);
             setThumbState('idle');
+        }
+    };
+
+    const handleExportSVG = async () => {
+        if (svgState !== 'idle') return;
+        setSvgState('exporting');
+        try {
+            const { getPixiApp } = await import('../utils/thumbnailGenerator');
+            const app = getPixiApp();
+            if (!app) {
+                console.warn('SVG export: no Pixi app');
+                setSvgState('idle');
+                return;
+            }
+            const { svg, warnings } = exportStageToSVG(app, project);
+            if (warnings.length) console.warn('SVG export warnings:', warnings);
+            const safeName = (project.name || 'snapshot').replace(/[^a-z0-9-_]+/gi, '_');
+            downloadSVG(svg, `${safeName}.svg`);
+            setSvgState('done');
+            setTimeout(() => setSvgState('idle'), 1500);
+        } catch (e) {
+            console.error('SVG export failed', e);
+            setSvgState('idle');
         }
     };
 
@@ -225,6 +250,22 @@ const TopBar: React.FC = () => {
                     <Camera size={14} className="text-[#D4AF37]" />
                     <span className="text-[10px] font-bold uppercase tracking-widest">
                         {thumbState === 'saving' ? 'Saving…' : thumbState === 'saved' ? 'Saved' : 'Set Thumbnail'}
+                    </span>
+                </button>
+
+                <button
+                    onClick={handleExportSVG}
+                    disabled={svgState !== 'idle'}
+                    title="Prototype: snapshot the current frame as an SVG. Filters are not preserved; gradients/textures fall back to base color."
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded border transition-colors active:scale-95 disabled:cursor-default ${
+                        svgState === 'done'
+                            ? 'border-[#D4AF37]/60 bg-[#D4AF37]/10 text-[#D4AF37]'
+                            : 'border-white/20 hover:bg-white/5 text-white/60 hover:text-white'
+                    }`}
+                >
+                    <FileCode size={14} className="text-[#D4AF37]" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest">
+                        {svgState === 'exporting' ? 'Exporting…' : svgState === 'done' ? 'Saved' : 'Export SVG'}
                     </span>
                 </button>
 
