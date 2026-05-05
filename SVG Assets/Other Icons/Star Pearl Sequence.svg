@@ -1,0 +1,20 @@
+<svg width="530" height="530" viewBox="0 0 530 530" fill="none" xmlns="http://www.w3.org/2000/svg">
+<line x1="353" y1="182" x2="295" y2="151" stroke="#041822" stroke-width="4"/>
+<line y1="-2" x2="66" y2="-2" transform="matrix(1 -0.5 -0.5 -1 177 180)" stroke="#041822" stroke-width="4"/>
+<line x1="178" y1="348" x2="236" y2="379" stroke="#041822" stroke-width="4"/>
+<line y1="-2" x2="66" y2="-2" transform="matrix(-1 0.5 0.5 1 354 350)" stroke="#041822" stroke-width="4"/>
+<line y1="-2" x2="66" y2="-2" transform="matrix(0 1 1 0 380 232)" stroke="#041822" stroke-width="4"/>
+<line y1="-2" x2="66" y2="-2" transform="matrix(0 1 1 0 151 232)" stroke="#041822" stroke-width="4"/>
+<circle cx="265" cy="398" r="32.5" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="265" cy="133" r="32.5" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="379.5" cy="332" r="32.5" transform="rotate(-60 379.5 332)" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="150" cy="199.5" r="32.5" transform="rotate(-60 150 199.5)" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="150" cy="331.5" r="32.5" transform="rotate(60 150 331.5)" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="379.5" cy="199" r="32.5" transform="rotate(60 379.5 199)" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="266" cy="265" r="32.5" transform="rotate(60 266 265)" fill="#041822" stroke="#041822" stroke-width="7"/>
+<path d="M354 218.5L296 249.5M177 312.5L237 280.5" stroke="#041822" stroke-width="4"/>
+<path d="M266 165L266 231M266 365L266 297" stroke="#041822" stroke-width="4"/>
+<path d="M179 214.5L236.5 248M352.5 314.5L294 281.5" stroke="#041822" stroke-width="4"/>
+<path d="M248.5 161.5L164.5 302L178 314L181.5 330H346L353 314L364 302L281.5 161.5" stroke="#041822" stroke-width="2"/>
+<path d="M281.5 370.5L365.5 230L352 218L348.5 202L184 202L177 218L166 230L248.5 370.5" stroke="#041822" stroke-width="2"/>
+</svg>

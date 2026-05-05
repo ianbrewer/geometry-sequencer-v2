@@ -1,0 +1,20 @@
+<svg width="530" height="530" viewBox="0 0 530 530" fill="none" xmlns="http://www.w3.org/2000/svg">
+<line x1="352.985" y1="181.764" x2="294.985" y2="150.764" stroke="#041822" stroke-width="4"/>
+<line y1="-2" x2="65.7649" y2="-2" transform="matrix(0.881932 -0.471376 -0.471376 -0.881932 176.928 180)" stroke="#041822" stroke-width="4"/>
+<line x1="177.87" y1="348.236" x2="235.871" y2="379.236" stroke="#041822" stroke-width="4"/>
+<line y1="-2" x2="65.7649" y2="-2" transform="matrix(-0.881932 0.471376 0.471376 0.881932 353.928 350)" stroke="#041822" stroke-width="4"/>
+<line y1="-2" x2="65.7649" y2="-2" transform="matrix(-4.37114e-08 1 1 4.37114e-08 379.928 232)" stroke="#041822" stroke-width="4"/>
+<line y1="-2" x2="65.7649" y2="-2" transform="matrix(-4.37114e-08 1 1 4.37114e-08 150.928 232)" stroke="#041822" stroke-width="4"/>
+<circle cx="264.928" cy="398" r="32.5" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="264.928" cy="133" r="32.5" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="379.675" cy="331.751" r="32.5" transform="rotate(-60 379.675 331.751)" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="150.177" cy="199.251" r="32.5" transform="rotate(-60 150.177 199.251)" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="150.179" cy="331.749" r="32.5" transform="rotate(60 150.179 331.749)" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="379.677" cy="199.249" r="32.5" transform="rotate(60 379.677 199.249)" fill="#041822" stroke="#041822" stroke-width="7"/>
+<circle cx="266.104" cy="265.177" r="32.5" transform="rotate(60 266.104 265.177)" fill="#041822" stroke="#041822" stroke-width="7"/>
+<path d="M354.16 218.44L295.926 249.499M177.16 312.44L236.927 280.5" stroke="#041822" stroke-width="4"/>
+<path d="M265.93 164.789L265.93 230.894M265.93 365.201L265.93 297" stroke="#041822" stroke-width="4"/>
+<path d="M178.896 214.455L236.412 247.978M352.458 314.661L293.927 281.5" stroke="#041822" stroke-width="4"/>
+<path d="M248.428 161.5L164.428 302L177.928 314L181.428 330H345.928L352.928 314L363.928 302L281.428 161.5" stroke="#041822" stroke-width="2"/>
+<path d="M281.428 370.5L365.428 230L351.928 218L348.428 202L183.928 202L176.928 218L165.928 230L248.428 370.5" stroke="#041822" stroke-width="2"/>
+</svg>

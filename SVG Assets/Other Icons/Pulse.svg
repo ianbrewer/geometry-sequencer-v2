@@ -1,0 +1,14 @@
+<svg width="530" height="530" viewBox="0 0 530 530" fill="none" xmlns="http://www.w3.org/2000/svg">
+<circle cx="266" cy="263" r="36.5" stroke="#041822" stroke-width="7"/>
+<circle cx="268" cy="61.5" r="11.5" stroke="#041822" stroke-width="2"/>
+<circle cx="369.5" cy="89" r="8.5" transform="rotate(30 369.5 89)" stroke="#041822" stroke-width="2"/>
+<circle cx="369.5" cy="442" r="8.5" transform="rotate(150 369.5 442)" stroke="#041822" stroke-width="2"/>
+<circle cx="268" cy="469" r="11.5" transform="rotate(-180 268 469)" stroke="#041822" stroke-width="2"/>
+<circle cx="166" cy="442" r="10.5" transform="rotate(-150 166 442)" stroke="#041822" stroke-width="4"/>
+<circle cx="91.5" cy="367.5" r="14" transform="rotate(-120 91.5 367.5)" stroke="#041822" stroke-width="4"/>
+<circle cx="64" cy="265.5" r="15.5" transform="rotate(-90 64 265.5)" stroke="#041822" stroke-width="7"/>
+<circle cx="91.5" cy="163.5" r="14" transform="rotate(-60 91.5 163.5)" stroke="#041822" stroke-width="4"/>
+<circle cx="166" cy="89" r="10.5" transform="rotate(-30 166 89)" stroke="#041822" stroke-width="4"/>
+<path d="M137.5 180.5C184.5 102.5 285.5 76 364.5 121.5C444 167.5 471.5 269.5 425.5 349.5C379.5 429 277.5 456.5 197.5 410.5C170 394.5 149 372.5 135 346.5C161 387 207 414 259 414C341 414 407 347.5 407 265.5C407 184 341 117.5 259 117.5C209 117.5 164.5 142.5 137.5 180.5Z" fill="#041822"/>
+<path d="M357 327C324 382.5 252 401.5 195.5 369C138.5 336 119 263.5 152 206.5C185 149.5 257.5 130 314.5 163C334 174.5 349 190.5 359 208.5C340.5 180 308 160.5 270.5 160.5C212.5 160.5 165 208 165 266.5C165 324.5 212.5 372 270.5 372C306.5 372 338 354 357 327Z" fill="#041822"/>
+</svg>
