@@ -217,6 +217,7 @@ export interface LayerConfig {
     // I-Ching Specific
     ichingInputId?: number; // 1-64
     ichingHighlightIndex?: number; // 1-6 (0 for none)
+    ichingAnimationDuration?: number; // seconds — absolute playback length of the hexagram animation, independent of layer timeline
 
     // Asset Specific (Stage C)
     // For 'asset_set': folder whose assets form the instance series (count = folder size).
@@ -318,10 +319,14 @@ export interface AppState {
     seedDefaultAssetFolders: () => Promise<void>;
 
     // Project thumbnail actions
-    captureCurrentProjectThumbnail: () => Promise<Blob | null>;
+    captureCurrentProjectThumbnail: (captureTimeOverride?: number | 'end') => Promise<Blob | null>;
     uploadProjectThumbnail: (projectId: string, blob: Blob) => Promise<void>;
     fetchProjectThumbnails: () => Promise<void>;
-    regenerateAllProjectThumbnails: (onProgress?: (done: number, total: number) => void) => Promise<void>;
+    regenerateProjectThumbnails: (options?: {
+        projectIds?: string[];
+        captureTime?: number | 'end';
+        onProgress?: (done: number, total: number) => void;
+    }) => Promise<void>;
 
     // Global saved palette (cross-project, browser-scoped via localStorage)
     addSavedColor: (color: string) => void;

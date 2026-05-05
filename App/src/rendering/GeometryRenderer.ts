@@ -525,10 +525,19 @@ export class GeometryRenderer {
                     const g = this.getGraphics();
 
                     let progress = 0;
-                    const duration = layer.timeline.end - layer.timeline.start;
-                    if (duration > 0) {
-                        const timeInto = activeTime - layer.timeline.start;
-                        progress = Math.max(0, Math.min(1, timeInto / duration));
+                    const isIChing = layer.type === 'iching' || layer.type === 'iching_lines';
+                    if (isIChing) {
+                        const animDuration = effectiveConfig.ichingAnimationDuration ?? 5;
+                        if (animDuration > 0) {
+                            const timeInto = activeTime - layer.timeline.start;
+                            progress = Math.max(0, Math.min(1, timeInto / animDuration));
+                        }
+                    } else {
+                        const duration = layer.timeline.end - layer.timeline.start;
+                        if (duration > 0) {
+                            const timeInto = activeTime - layer.timeline.start;
+                            progress = Math.max(0, Math.min(1, timeInto / duration));
+                        }
                     }
 
                     let renderType = layer.type;

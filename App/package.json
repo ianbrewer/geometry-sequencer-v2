@@ -12,7 +12,12 @@
     "build:pixi": "npx vite build --config vite.pixi.config.ts",
     "build:astro": "npx vite build --config vite.astro.config.ts",
     "build:amino": "npx vite build --config vite.amino.config.ts",
-    "build:bundles": "npm run build:pixi && npm run build:astro && npm run build:amino && npm run build:player"
+    "build:bundles": "npm run build:pixi && npm run build:astro && npm run build:amino && npm run build:player",
+    "scene:list": "tsx scripts/scene/list.ts",
+    "scene:pull": "tsx scripts/scene/pull.ts",
+    "scene:push": "tsx scripts/scene/push.ts",
+    "scene:new": "tsx scripts/scene/new.ts",
+    "scene:assets": "tsx scripts/scene/assets.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -46,6 +51,7 @@
     "svgo": "^4.0.1",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.18",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^6.4.1",

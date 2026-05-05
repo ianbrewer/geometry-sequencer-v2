@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
-import { X, Film, Download, FileCode, Check, FileJson, Share2, Code2, Smartphone } from 'lucide-react';
+import { X, Film, Download, FileCode, Check, FileJson, Share2, Code2, Smartphone, Image as ImageIcon } from 'lucide-react';
+import { renderProjectToSVG, downloadSVG } from '../utils/svgExport';
 import { useRecorder } from '../hooks/useRecorder';
 import { useStore } from '../store/useStore';
-import { supabase } from '../supabaseClient';
 import { EXPORT_TEMPLATES, REACT_NATIVE_TEMPLATES } from '../data/exportTemplates';
-import type { Project, Asset, AssetMimeType } from '../types';
 import JSZip from 'jszip';
+import {
+    blobToBase64,
+    collectExportAssets,
+    countAssetLayers,
+    escapeForTemplate,
+} from '../utils/exportHelpers';
 
 interface ExportModalProps {
     onClose: () => void;
@@ -13,171 +18,15 @@ interface ExportModalProps {
 
 import { ModernToggle } from './ModernToggle';
 
-// ─── Asset bundling helpers (shared by HTML + RN exports) ──────────────
-//
-// asset_set / asset_single layers reference Supabase Storage assets by id
-// (and asset_set additionally by folder id). For exports to render those
-// layers offline, we fetch the actual blobs and ship them with the bundle:
-//   - HTML: written to assets/<id>.<ext>, registry points at relative paths
-//   - RN:   inlined as base64 data URLs since the WebView is sandboxed
-//
-// The runtime player consumes the registry via window.GEOMETRY_ASSETS.
-
-type CollectedAsset = {
-    id: string;
-    mimeType: AssetMimeType;
-    storagePath: string;
-    blob: Blob;
-    extension: string;
-};
-
-type CollectedExport = {
-    assets: CollectedAsset[];
-    folders: Record<string, string[]>; // ordered asset ids per folder id
-};
-
-const extensionForMime = (mime: AssetMimeType): string => {
-    switch (mime) {
-        case 'image/svg+xml': return 'svg';
-        case 'image/png':     return 'png';
-        case 'image/jpeg':    return 'jpg';
-        case 'text/plain':    return 'txt';
-        default:              return 'bin';
-    }
-};
-
-const blobToBase64 = (blob: Blob): Promise<string> =>
-    new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(reader.error);
-        reader.onload = () => {
-            const result = reader.result as string;
-            // result is `data:<mime>;base64,<b64>` — strip the prefix
-            const comma = result.indexOf(',');
-            resolve(comma >= 0 ? result.slice(comma + 1) : result);
-        };
-        reader.readAsDataURL(blob);
-    });
-
-// Walks the project, fetches every asset referenced by asset_set / asset_single
-// layers (including all assets in any referenced folder, in order), and returns
-// them as in-memory blobs ready to be written into a zip.
-async function collectExportAssets(
-    project: Project,
-    onStatus: (msg: string) => void,
-): Promise<CollectedExport> {
-    const folderIds = new Set<string>();
-    const singleAssetIds = new Set<string>();
-
-    for (const layer of project.layers) {
-        if (layer.type === 'asset_set' && layer.config.assetFolderId) {
-            folderIds.add(layer.config.assetFolderId);
-        } else if (layer.type === 'asset_single' && layer.config.assetId) {
-            singleAssetIds.add(layer.config.assetId);
-        }
-    }
-
-    if (folderIds.size === 0 && singleAssetIds.size === 0) {
-        return { assets: [], folders: {} };
-    }
-
-    const store = useStore.getState();
-    const { user } = store;
-    if (!user) throw new Error('You must be signed in to export assets.');
-
-    // 1) Hydrate assetsByFolder for every referenced folder.
-    onStatus('Loading asset folders...');
-    const folders: Record<string, string[]> = {};
-    const assetMeta = new Map<string, Asset>();
-
-    for (const folderId of folderIds) {
-        const list = await store.fetchAssets(folderId);
-        folders[folderId] = list.map(a => a.id);
-        for (const a of list) assetMeta.set(a.id, a);
-    }
-
-    // 2) Resolve asset_single ids that weren't pulled in via a folder.
-    const missingSingleIds = [...singleAssetIds].filter(id => !assetMeta.has(id));
-    if (missingSingleIds.length) {
-        const { data, error } = await supabase
-            .from('assets')
-            .select('id, folder_id, name, mime_type, storage_path, size_bytes, width, height, last_modified')
-            .eq('user_id', user.id)
-            .in('id', missingSingleIds);
-        if (error) throw new Error(`Failed to load asset metadata: ${error.message}`);
-        for (const row of (data ?? []) as Array<{
-            id: string; folder_id: string | null; name: string;
-            mime_type: AssetMimeType; storage_path: string;
-            size_bytes: number | null; width: number | null;
-            height: number | null; last_modified: number | null;
-        }>) {
-            assetMeta.set(row.id, {
-                id: row.id,
-                folderId: row.folder_id,
-                name: row.name,
-                mimeType: row.mime_type,
-                storagePath: row.storage_path,
-                sizeBytes: row.size_bytes,
-                width: row.width,
-                height: row.height,
-                lastModified: row.last_modified,
-                sortOrder: null,
-            });
-        }
-    }
-
-    // 3) Build the dedup'd id list: folder assets + asset_single ids.
-    const allIds = new Set<string>();
-    for (const ids of Object.values(folders)) for (const id of ids) allIds.add(id);
-    for (const id of singleAssetIds) allIds.add(id);
-
-    // 4) Fetch each blob via a signed URL. Run in parallel — the bucket is
-    //    behind RLS and signed-URL minting is per-asset, but blob fetches
-    //    themselves go straight to Supabase Storage CDN.
-    const idList = [...allIds];
-    onStatus(`Fetching ${idList.length} asset${idList.length === 1 ? '' : 's'}...`);
-
-    let completed = 0;
-    const collected: CollectedAsset[] = await Promise.all(
-        idList.map(async (id) => {
-            const meta = assetMeta.get(id);
-            if (!meta) throw new Error(`Asset ${id} referenced by project but not found.`);
-            const url = await store.signedUrlForAsset(id);
-            if (!url) throw new Error(`Could not get download URL for asset ${meta.name}.`);
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`Failed to download ${meta.name}: HTTP ${resp.status}`);
-            const blob = await resp.blob();
-            completed += 1;
-            onStatus(`Fetched ${completed}/${idList.length} assets...`);
-            return {
-                id: meta.id,
-                mimeType: meta.mimeType,
-                storagePath: meta.storagePath,
-                blob,
-                extension: extensionForMime(meta.mimeType),
-            };
-        })
-    );
-
-    return { assets: collected, folders };
-}
-
-// Total count of layers that will need bundled assets to render.
-const countAssetLayers = (project: Project): number =>
-    project.layers.reduce(
-        (n, l) => n + (
-            (l.type === 'asset_set' && l.config.assetFolderId) ||
-            (l.type === 'asset_single' && l.config.assetId)
-                ? 1 : 0
-        ),
-        0
-    );
-
 const ExportModal: React.FC<ExportModalProps> = ({ onClose }) => {
     const { startRecording, stopRecording, downloadVideo, getSupportedMimeTypes } = useRecorder();
     const project = useStore(s => s.project);
 
-    const [activeTab, setActiveTab] = useState<'video' | 'html' | 'json' | 'react' | 'native'>('video');
+    const [activeTab, setActiveTab] = useState<'video' | 'svg' | 'html' | 'json' | 'react' | 'native'>('video');
+
+    // SVG state
+    const [svgFrameMode, setSvgFrameMode] = useState<'first' | 'last' | 'time'>('first');
+    const [svgFrameTime, setSvgFrameTime] = useState<number>(0);
 
     // Auto-detect which optional SVG data bundles the animation uses
     const usesAstro = project.layers.some((l: any) => l.type === 'astrology');
@@ -571,15 +420,7 @@ ${hasAssets ? '    <!-- Asset Registry (asset_set / asset_single, inlined as dat
                 ? 'window.GEOMETRY_ASSETS=' + JSON.stringify({ assets: dataUrlAssets, folders: collected.folders }) + ';'
                 : '';
 
-            // Escape both scripts for storage inside JS template literals:
-            //   - backslashes  ->  double backslash
-            //   - backticks    ->  escaped backtick
-            //   - ${           ->  escaped to prevent interpolation
-            const escapeForTemplate = (src: string) => src
-                .replace(/\\/g, '\\\\')
-                .replace(/`/g, '\\`')
-                .replace(/\$\{/g, '\\${');
-
+            // Escape both scripts for storage inside JS template literals.
             const escapedPixi = escapeForTemplate(pixiScriptRaw);
             const escapedPlayer = escapeForTemplate(playerScriptRaw);
 
@@ -1135,6 +976,27 @@ ${hasAssets ? '    <!-- Asset Registry (asset_set / asset_single, inlined as dat
         }
     };
 
+    const handleSvgExport = async () => {
+        setIsExporting(true);
+        setStatus('Rendering SVG...');
+        try {
+            const { svg, warnings } = await renderProjectToSVG(project, {
+                mode: svgFrameMode,
+                time: svgFrameTime,
+            });
+            if (warnings.length) console.warn('SVG export warnings:', warnings);
+            const safeName = (project.name || 'snapshot').replace(/[^a-z0-9-_]+/gi, '_');
+            const suffix = svgFrameMode === 'time' ? `_t${svgFrameTime.toFixed(2)}s` : `_${svgFrameMode}`;
+            downloadSVG(svg, `${safeName}${suffix}.svg`);
+            setStatus('Done!');
+            setTimeout(() => { setIsExporting(false); onClose(); }, 600);
+        } catch (e) {
+            console.error('SVG export failed', e);
+            setStatus(e instanceof Error ? `Error: ${e.message}` : 'Error!');
+            setIsExporting(false);
+        }
+    };
+
     const handleJsonExport = () => {
         const safeName = project.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const jsonFilename = `${safeName}.json`;
@@ -1180,6 +1042,12 @@ ${hasAssets ? '    <!-- Asset Registry (asset_set / asset_single, inlined as dat
                             className={`flex-1 py-2 text-xs font-bold rounded flex items-center justify-center gap-2 transition-all ${activeTab === 'video' ? 'bg-[#D4AF37] text-black shadow' : 'text-white/40 hover:text-white'}`}
                         >
                             <Film size={14} /> Video
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('svg')}
+                            className={`flex-1 py-1.5 text-[10px] font-bold rounded flex items-center justify-center gap-1.5 transition-all ${activeTab === 'svg' ? 'bg-[#D4AF37] text-black shadow' : 'text-white/40 hover:text-white'}`}
+                        >
+                            <ImageIcon size={12} /> SVG
                         </button>
                         <button
                             onClick={() => setActiveTab('html')}
@@ -1344,6 +1212,52 @@ ${hasAssets ? '    <!-- Asset Registry (asset_set / asset_single, inlined as dat
                                     Export
                                 </button>
                             </>
+                        ) : activeTab === 'svg' ? (
+                            <div className="space-y-4">
+                                <div className="bg-white/5 border border-white/10 p-4 rounded-lg">
+                                    <h4 className="text-white font-bold mb-2 flex items-center gap-2"><ImageIcon size={16} className="text-[#D4AF37]" /> Vector Snapshot</h4>
+                                    <p className="text-xs text-white/60 leading-relaxed">
+                                        Exports a single SVG of the chosen frame. Filters, gradients, and raster sprites are skipped — vectors only. ViewBox auto-fits all geometry (including off-canvas).
+                                    </p>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-white/60 uppercase tracking-wider">Frame</label>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {(['first', 'time', 'last'] as const).map(m => (
+                                            <button
+                                                key={m}
+                                                onClick={() => setSvgFrameMode(m)}
+                                                className={`px-3 py-2 text-xs rounded-md transition-all ${svgFrameMode === m ? 'bg-[#D4AF37] text-black font-bold' : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10'}`}
+                                            >
+                                                {m === 'first' ? 'First' : m === 'last' ? 'Last' : 'At time'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {svgFrameMode === 'time' && (
+                                        <div className="flex items-center gap-2 pt-1">
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                max={project.duration || 10}
+                                                step={0.01}
+                                                value={svgFrameTime}
+                                                onChange={(e) => setSvgFrameTime(parseFloat(e.target.value) || 0)}
+                                                className="flex-1 bg-black/30 border border-white/10 rounded px-2 py-1.5 text-xs text-white"
+                                            />
+                                            <span className="text-[10px] text-white/40">sec / {(project.duration || 10).toFixed(2)}s</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <button
+                                    onClick={handleSvgExport}
+                                    className="w-full h-12 bg-[#D4AF37] hover:bg-[#F4CF57] text-black font-bold rounded-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                                >
+                                    <ImageIcon size={18} />
+                                    Download SVG
+                                </button>
+                            </div>
                         ) : activeTab === 'html' ? (
                             <div className="space-y-4">
                                 <div className="bg-white/5 border border-white/10 p-4 rounded-lg">
@@ -1360,23 +1274,27 @@ ${hasAssets ? '    <!-- Asset Registry (asset_set / asset_single, inlined as dat
 
                                 {/* Optional Data Bundles */}
                                 <div className="space-y-2">
-                                    <label className="text-xs font-bold text-white/60 uppercase tracking-wider">Optional Data Bundles</label>
-                                    <div className="flex items-center justify-between p-2.5 bg-black/20 border border-white/5 rounded-lg">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs text-white/70">Astro Symbols</span>
-                                            <span className="text-[9px] text-white/30">4 KB</span>
-                                            {usesAstro && <span className="text-[9px] text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">Auto-detected</span>}
+                                    {(usesAstro || usesAmino || usesCustomSvg || assetLayerCount > 0) && (
+                                        <label className="text-xs font-bold text-white/60 uppercase tracking-wider">Included Bundles</label>
+                                    )}
+                                    {usesAstro && (
+                                        <div className="flex items-center justify-between p-2.5 bg-black/20 border border-white/5 rounded-lg">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-white/70">Astro Symbols (legacy)</span>
+                                                <span className="text-[9px] text-white/30">4 KB</span>
+                                            </div>
+                                            <ModernToggle checked={includeAstro} onChange={setIncludeAstro} label="" />
                                         </div>
-                                        <ModernToggle checked={includeAstro} onChange={setIncludeAstro} label="" />
-                                    </div>
-                                    <div className="flex items-center justify-between p-2.5 bg-black/20 border border-white/5 rounded-lg">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs text-white/70">Amino Molecules</span>
-                                            <span className="text-[9px] text-white/30">47 KB</span>
-                                            {usesAmino && <span className="text-[9px] text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">Auto-detected</span>}
+                                    )}
+                                    {usesAmino && (
+                                        <div className="flex items-center justify-between p-2.5 bg-black/20 border border-white/5 rounded-lg">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-white/70">Amino Molecules (legacy)</span>
+                                                <span className="text-[9px] text-white/30">47 KB</span>
+                                            </div>
+                                            <ModernToggle checked={includeAmino} onChange={setIncludeAmino} label="" />
                                         </div>
-                                        <ModernToggle checked={includeAmino} onChange={setIncludeAmino} label="" />
-                                    </div>
+                                    )}
                                     {usesCustomSvg && (
                                         <div className="flex items-center gap-2 p-2.5 bg-black/20 border border-white/5 rounded-lg">
                                             <span className="text-[9px] text-green-500">✓</span>
@@ -1439,23 +1357,27 @@ ${hasAssets ? '    <!-- Asset Registry (asset_set / asset_single, inlined as dat
 
                                 {/* Optional Data Bundles */}
                                 <div className="space-y-2">
-                                    <label className="text-xs font-bold text-white/60 uppercase tracking-wider">Optional Data Bundles</label>
-                                    <div className="flex items-center justify-between p-2.5 bg-black/20 border border-white/5 rounded-lg">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs text-white/70">Astro Symbols</span>
-                                            <span className="text-[9px] text-white/30">4 KB</span>
-                                            {usesAstro && <span className="text-[9px] text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">Auto-detected</span>}
+                                    {(usesAstro || usesAmino || usesCustomSvg || assetLayerCount > 0) && (
+                                        <label className="text-xs font-bold text-white/60 uppercase tracking-wider">Included Bundles</label>
+                                    )}
+                                    {usesAstro && (
+                                        <div className="flex items-center justify-between p-2.5 bg-black/20 border border-white/5 rounded-lg">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-white/70">Astro Symbols (legacy)</span>
+                                                <span className="text-[9px] text-white/30">4 KB</span>
+                                            </div>
+                                            <ModernToggle checked={includeAstro} onChange={setIncludeAstro} label="" />
                                         </div>
-                                        <ModernToggle checked={includeAstro} onChange={setIncludeAstro} label="" />
-                                    </div>
-                                    <div className="flex items-center justify-between p-2.5 bg-black/20 border border-white/5 rounded-lg">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs text-white/70">Amino Molecules</span>
-                                            <span className="text-[9px] text-white/30">47 KB</span>
-                                            {usesAmino && <span className="text-[9px] text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">Auto-detected</span>}
+                                    )}
+                                    {usesAmino && (
+                                        <div className="flex items-center justify-between p-2.5 bg-black/20 border border-white/5 rounded-lg">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-white/70">Amino Molecules (legacy)</span>
+                                                <span className="text-[9px] text-white/30">47 KB</span>
+                                            </div>
+                                            <ModernToggle checked={includeAmino} onChange={setIncludeAmino} label="" />
                                         </div>
-                                        <ModernToggle checked={includeAmino} onChange={setIncludeAmino} label="" />
-                                    </div>
+                                    )}
                                     {usesCustomSvg && (
                                         <div className="flex items-center gap-2 p-2.5 bg-black/20 border border-white/5 rounded-lg">
                                             <span className="text-[9px] text-green-500">✓</span>

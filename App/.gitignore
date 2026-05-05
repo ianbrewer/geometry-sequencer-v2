@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 .vercel
 .env*.local
+
+# Local scene files for the scene:* CLI scripts (pulled from / pushed to Supabase)
+scenes/

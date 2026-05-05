@@ -867,6 +867,7 @@ const Inspector: React.FC = () => {
                                             <ControlSlider label="Hexagram" value={activeLayer?.config?.ichingInputId ?? 1} min={1} max={64} step={1} onChange={(v: number, skip?: boolean) => setConfigValue('ichingInputId', v, skip)} isFixed />
                                         )}
                                         <ControlSlider label="Highlight" value={activeLayer?.config?.ichingHighlightIndex ?? 0} min={0} max={6} step={1} onChange={(v: number, skip?: boolean) => setConfigValue('ichingHighlightIndex', v, skip)} isFixed />
+                                        <ControlSlider label="Anim Duration (s)" value={activeLayer?.config?.ichingAnimationDuration ?? 5} min={0.5} max={30} step={0.1} onChange={(v: number, skip?: boolean) => setConfigValue('ichingAnimationDuration', v, skip)} isFixed />
                                     </div>
                                 </div>
                             )}
