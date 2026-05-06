@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useRecorder } from '../hooks/useRecorder';
 import { supabase } from '../supabaseClient';
+import { useStore } from '../store/useStore';
 import type { Project, ProjectMetadata, Folder } from '../types';
 import { ModernToggle } from './ModernToggle';
 import {
@@ -17,7 +18,7 @@ import {
     runBatchVideoExport,
     type BatchProgressStatus,
 } from '../utils/batchExport';
-import { safeFilename } from '../utils/exportHelpers';
+import { blobToBase64, safeFilename } from '../utils/exportHelpers';
 
 interface BatchExportModalProps {
     folder: Folder;
@@ -65,6 +66,7 @@ const BatchExportModal: React.FC<BatchExportModalProps> = ({ folder, projects: p
     const [exportError, setExportError] = useState<string | null>(null);
 
     const abortRef = useRef<AbortController | null>(null);
+    const projectThumbnails = useStore(s => s.projectThumbnails);
 
     // ── Load full project data on open ────────────────────────────────
     useEffect(() => {
@@ -87,13 +89,34 @@ const BatchExportModal: React.FC<BatchExportModalProps> = ({ folder, projects: p
                     const proj = byId.get(meta.id);
                     if (proj) ordered.push({ ...proj, id: meta.id, name: meta.name, thumbnailData: meta.thumbnailData } as Project);
                 }
+
+                // Hydrate thumbnails from the store's signed-URL map into
+                // inline data URLs so the HTML gallery index can render them
+                // offline. Folder view stores them as signed URLs that expire.
+                await Promise.all(ordered.map(async (p) => {
+                    if ((p as Project & { thumbnailData?: string }).thumbnailData) return;
+                    const signedUrl = projectThumbnails[p.id];
+                    if (!signedUrl) return;
+                    try {
+                        const res = await fetch(signedUrl);
+                        if (!res.ok) return;
+                        const blob = await res.blob();
+                        const b64 = await blobToBase64(blob);
+                        (p as Project & { thumbnailData?: string }).thumbnailData =
+                            `data:${blob.type || 'image/png'};base64,${b64}`;
+                    } catch {
+                        // Best-effort — leave thumbnailData unset so the
+                        // gallery falls back to the colored placeholder.
+                    }
+                }));
+
                 if (!cancelled) setLoadedProjects(ordered);
             } catch (e) {
                 if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Failed to load projects');
             }
         })();
         return () => { cancelled = true; };
-    }, [projectMeta]);
+    }, [projectMeta, projectThumbnails]);
 
     // ── Auto-detect optional bundle usage across the union of projects ──
     const { usesAstro, usesAmino, usesCustomSvg, hasAssetLayers } = useMemo(() => {
