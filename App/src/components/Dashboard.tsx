@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Plus, Folder as FolderIcon, Clock, Copy, Edit2, Trash2, ArrowRight, Play, ChevronRight, ChevronDown, FolderPlus, Share2, LogOut, User as UserIcon, GripVertical, LayoutGrid, List, RefreshCw } from 'lucide-react';
+import { Plus, Folder as FolderIcon, Clock, Copy, Edit2, Trash2, ArrowRight, Play, ChevronRight, ChevronDown, FolderPlus, Share2, LogOut, User as UserIcon, GripVertical, LayoutGrid, List, RefreshCw, ArrowDownAZ } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { formatDistanceToNow } from 'date-fns';
 import GeometryCanvas from './GeometryCanvas';
@@ -361,6 +361,7 @@ const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOv
 
     const toggleFolder = useStore(s => s.toggleFolder);
     const deleteFolder = useStore(s => s.deleteFolder);
+    const sortFolderAlphabetically = useStore(s => s.sortFolderAlphabetically);
     const [isRenaming, setIsRenaming] = useState(startRenaming);
     const [newName, setNewName] = useState(folder.name);
     const [isRegenOpen, setIsRegenOpen] = useState(false);
@@ -478,6 +479,18 @@ const FolderDropArea = ({ folder, projects, overInfo = null, isProjectDraggingOv
                                 }}
                             >
                                 <RefreshCw size={12} />
+                            </button>
+                        )}
+                        {projects.length > 1 && (
+                            <button
+                                className="p-1 hover:text-[#D4AF37] text-white/30"
+                                title="Sort projects A→Z (also reorders exports)"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    sortFolderAlphabetically(folder.id);
+                                }}
+                            >
+                                <ArrowDownAZ size={12} />
                             </button>
                         )}
                         <button className="p-1 hover:text-white text-white/30" onClick={handleStartRenaming}><Edit2 size={12} /></button>

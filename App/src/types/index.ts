@@ -341,6 +341,7 @@ export interface AppState {
     toggleFolder: (folderId: string) => void;
     renameFolder: (id: string, name: string) => void;
     reorderFolders: (startIndex: number, endIndex: number) => void;
+    sortFolderAlphabetically: (folderId: string) => Promise<void>;
     currentTime: number;
     isPlaying: boolean;
     isLooping: boolean; // New

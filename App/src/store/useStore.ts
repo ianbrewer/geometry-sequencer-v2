@@ -1403,6 +1403,43 @@ export const useStore = create<AppState>((set, get) => {
             } catch (e) { console.error("Failed reorder", e); }
         },
 
+        sortFolderAlphabetically: async (folderId: string) => {
+            const { user } = get();
+            if (!user) return;
+
+            const folderProjects = get().savedProjects
+                .filter(p => p.folderId === folderId)
+                .slice()
+                .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+            if (folderProjects.length === 0) return;
+
+            // UI sorts descending by `order`, so first alphabetically gets the highest order.
+            const newOrders = new Map<string, number>();
+            folderProjects.forEach((p, i) => newOrders.set(p.id, folderProjects.length - i));
+
+            set(state => ({
+                savedProjects: state.savedProjects.map(p =>
+                    newOrders.has(p.id) ? { ...p, order: newOrders.get(p.id)! } : p
+                ),
+            }));
+
+            try {
+                const updates = await Promise.all(folderProjects.map(p =>
+                    supabase.from('projects').select('data').eq('id', p.id).single()
+                ));
+                await Promise.all(updates.map((res, i) => {
+                    const p = folderProjects[i];
+                    const order = newOrders.get(p.id)!;
+                    const data = res.data ? { ...res.data.data, order } : { order };
+                    return supabase.from('projects').update({
+                        data,
+                        last_modified: Date.now(),
+                    }).eq('id', p.id);
+                }));
+            } catch (e) { console.error('Failed alphabetical sort', e); }
+        },
+
         moveProject: async (projectId: string, folderId: string | null, targetProjectId?: string, position?: 'before' | 'after') => {
             const { user } = get();
             if (!user) return;

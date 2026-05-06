@@ -143,3 +143,6 @@ local-1777824000000-1008	Asset rebuild Stage H — Optional vector rendering for
 1213070073876296	Improve play button visibility	Future Upgrades	Low	UX/UI	Timeline	Unassigned		Enhancement: Put circle around play triangle make icon more obvious.\n\nExpected Behavior: Play button should be more visually prominent and easier to identify in the interface.	2026-02-01 15:46:22	
 1213070073876333	Add double-click rename functionality	Future Upgrades	Low			Unassigned		Feature Request: Double clicking on text in folder should trigger rename.\n\nExpected Behavior: \n\n    Double-clicking on any text/name in folder view should immediately enter rename mode\n    Should work consistently across all file/folder items\n    Provide clear visual feedback when in rename mode	2026-02-01 15:49:04	
 c4b1f66f-c2ed-421a-b866-3efa525e2c4e	Allow me to sort projects manually or alphabetically (requires migration from V1)	Idea							2026-05-05 10:13:59	
+b06a19c9-82cf-4d9d-8943-0dc73936acf9	need to be able to sort project in thumbnails	Idea							2026-05-06 09:10:46	
+0acf818a-b7ba-4969-aedb-4b3c6bb728f0	allow for sorting alphabetically and manually	Idea							2026-05-06 09:11:03	
+a6e04e97-6fb0-4342-b6f8-16b496de8d27	need thumbnails on html export for index page, use last frame or give option)	Idea							2026-05-06 09:11:17	
